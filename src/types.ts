@@ -48,8 +48,14 @@ export interface GeneratorSettings {
   minKeywords: number;
   maxKeywords: number;
   titleChoice: number;
-  metadataFor: 'image' | 'video' | 'eps' | 'png';
+  metadataFor: 'image' | 'video' | 'eps' | 'png' | 'all';
   concurrency: number;
+  singleWordKeywords: boolean;
+  silhouette: boolean;
+  transparentBackground: boolean;
+  prohibitedWords: boolean;
+  customPromptEnabled: boolean;
+  savedKeywords: string[];
 }
 
 export interface HistoryItem {

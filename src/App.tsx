@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { FixedSizeList } from 'react-window';
 import { 
   Play, 
   Pause, 
@@ -34,7 +35,10 @@ import {
   FileSpreadsheet,
   FileJson,
   Key,
-  Star
+  Star,
+  Tag,
+  Sparkles,
+  RefreshCw
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as piexif from "piexifjs";
@@ -72,8 +76,14 @@ export default function App() {
     minKeywords: 10,
     maxKeywords: 50,
     titleChoice: 1,
-    metadataFor: 'image',
-    concurrency: 3
+    metadataFor: 'all',
+    concurrency: 3,
+    singleWordKeywords: false,
+    silhouette: false,
+    transparentBackground: false,
+    prohibitedWords: false,
+    customPromptEnabled: false,
+    savedKeywords: []
   });
 
   const [files, setFiles] = useState<StockMetadata[]>([]);
@@ -83,18 +93,190 @@ export default function App() {
   const stopRef = React.useRef(false);
   const [isDragging, setIsDragging] = useState(false);
   const [mode, setMode] = useState<'image' | 'vector' | 'video' | 'prompt'>('vector');
-  const [theme, setTheme] = useState<'dark' | 'light' | 'system'>('dark');
+  const [theme, setTheme] = useState<'dark' | 'light' | 'blue'>('dark');
   const [genOptions, setGenOptions] = useState({
     description: true,
     filenameHint: true,
     autoEmbed: false,
     autoRetry: true,
     pngIsolated: true,
-    refinePngBg: false
+    refinePngBg: false,
+    autoSave: false,
+    autoExport: false,
+    aiEnhance: false
   });
 
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [newKeyword, setNewKeyword] = useState('');
   const [notification, setNotification] = useState<{ message: string; type: 'info' | 'error' | 'success' } | null>(null);
+
+  // Optimized Copyable Cell Component
+  const CopyableCell = useCallback(({ value, onChange, placeholder, colorClass, isGenerating, onCopy }: any) => {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = () => {
+      if (!value) return;
+      navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      if (onCopy) onCopy();
+    };
+
+    return (
+      <div className="w-full h-full relative group/cell">
+        <textarea 
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={cn(
+            "w-full h-full bg-secondary border border-border rounded p-2 text-[10px] resize-none focus:ring-1 focus:ring-blue-500 outline-none custom-scrollbar leading-tight placeholder:text-muted-foreground/30 uppercase font-bold transition-all",
+            colorClass,
+            isGenerating && "opacity-50 blur-[1px]"
+          )}
+          placeholder={placeholder}
+        />
+        {isGenerating && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <RefreshCw size={16} className="animate-spin text-blue-500 opacity-80" />
+          </div>
+        )}
+        <button 
+          onClick={handleCopy}
+          className={cn(
+            "absolute top-2 right-4 p-1 bg-muted border border-border rounded opacity-0 group-hover/cell:opacity-100 transition-all hover:bg-accent shadow-lg",
+            copied && "opacity-100 bg-emerald-500/20 border-emerald-500/50"
+          )}
+          title="COPY"
+        >
+          {copied ? <Check size={10} className="text-emerald-500" /> : <Copy size={10} className="text-muted-foreground" />}
+        </button>
+      </div>
+    );
+  }, []);
+
+  // Optimized Row Component for Virtualization
+  const FileRow = ({ index, style, data }: any) => {
+    const file = data[index];
+    if (!file) return null;
+
+    return (
+      <div 
+        style={style}
+        className={cn(
+          "flex flex-row w-full hover:bg-blue-500/5 transition-colors group items-center border-b border-border",
+          file.status === 'generating' && "bg-blue-500/10"
+        )}
+      >
+        <div className="w-[12%] px-3 py-1.5 border-r border-border flex items-center gap-2 overflow-hidden shrink-0 h-full">
+          <div className="w-8 h-8 bg-muted rounded border border-border flex-shrink-0 overflow-hidden relative shadow-sm">
+            {file.previewUrl ? (
+              <img src={file.previewUrl} alt="" className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" referrerPolicy="no-referrer" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                <FileText size={14} />
+              </div>
+            )}
+            {file.status === 'completed' && (
+              <div className="absolute inset-0 bg-emerald-500/10 flex items-center justify-center">
+                <CheckCircle2 size={14} className="text-emerald-500" />
+              </div>
+            )}
+            {file.status === 'generating' && (
+              <div className="absolute inset-0 bg-blue-500/10 flex items-center justify-center">
+                <RefreshCw size={14} className="animate-spin text-blue-500" />
+              </div>
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-bold text-muted-foreground truncate leading-none uppercase">{file.filename}</div>
+            <div className="flex items-center gap-1 mt-1">
+              <span className={cn(
+                "text-[7px] font-black px-1 py-0.5 rounded uppercase tracking-widest border",
+                file.status === 'completed' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                file.status === 'generating' ? "bg-blue-500/10 text-blue-400 border-blue-500/20 animate-pulse" :
+                file.status === 'error' ? "bg-red-500/10 text-red-400 border-red-500/20" : "bg-muted text-muted-foreground border-border"
+              )}>
+                {file.status}
+              </span>
+              {file.status === 'error' && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); regenerateSingleFile(file.id); }}
+                  className="text-[7px] font-black px-1 py-0.5 rounded uppercase tracking-widest bg-red-500 text-white hover:bg-red-400 transition-colors flex items-center gap-1 shadow-sm active:scale-95"
+                  title="RE-GENERATE METADATA"
+                >
+                  <RefreshCw size={8} />
+                  RE-GENERATE
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="w-[15%] px-3 py-1.5 border-r border-border h-full shrink-0">
+          <CopyableCell 
+            value={file.title}
+            onChange={(val: string) => updateFile(file.id, { title: val })}
+            placeholder="TITLE..."
+            colorClass="text-blue-400"
+            isGenerating={file.status === 'generating'}
+          />
+        </div>
+
+        <div className="w-[25%] px-3 py-1.5 border-r border-border h-full shrink-0 relative">
+          <CopyableCell 
+            value={file.keywords}
+            onChange={(val: string) => updateFile(file.id, { keywords: val })}
+            placeholder="KEYWORDS..."
+            colorClass="text-orange-400"
+            isGenerating={file.status === 'generating'}
+          />
+          {file.keywordScore && (
+            <div className="absolute bottom-1 right-4 text-[6px] font-black text-blue-400 bg-blue-500/10 px-1 py-0.25 rounded border border-blue-500/20 z-10">
+              {file.keywordScore}%
+            </div>
+          )}
+        </div>
+
+        <div className="w-[20%] px-3 py-1.5 border-r border-border h-full shrink-0">
+          <CopyableCell 
+            value={file.description}
+            onChange={(val: string) => updateFile(file.id, { description: val })}
+            placeholder="DESCRIPTION..."
+            colorClass="text-emerald-400"
+            isGenerating={file.status === 'generating'}
+          />
+        </div>
+
+        <div className="w-[10%] px-3 py-1.5 border-r border-border h-full shrink-0">
+          <CopyableCell 
+            value={file.category}
+            onChange={(val: string) => updateFile(file.id, { category: val })}
+            placeholder="CATEGORY..."
+            colorClass="text-purple-400"
+            isGenerating={file.status === 'generating'}
+          />
+        </div>
+
+        <div className="w-[8%] px-3 py-1.5 border-r border-border h-full shrink-0 flex items-center justify-center">
+          <div className="text-[10px] font-black text-muted-foreground bg-muted px-2 py-1 rounded border border-border">
+            {file.keywords ? file.keywords.split(',').length : 0}
+          </div>
+        </div>
+
+        <div className="w-[10%] px-3 py-1.5 h-full shrink-0 flex items-center justify-center gap-0.5">
+          {[1, 2, 3, 4, 5].map((star) => (
+            <Star 
+              key={star} 
+              size={10} 
+              className={cn(
+                "transition-all",
+                star <= (file.rating || 0) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/20"
+              )} 
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   useEffect(() => {
     if (notification) {
@@ -111,11 +293,7 @@ export default function App() {
   const [selectedExportSite, setSelectedExportSite] = useState('adobe');
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [directoryHandle, setDirectoryHandle] = useState<any>(null);
-  const [apiStatus, setApiStatus] = useState<Record<string, ApiStatus>>({
-    gemini: { status: 'idle' },
-    groq: { status: 'idle' },
-    mistral: { status: 'idle' }
-  });
+  const [apiStatus, setApiStatus] = useState<ApiStatus>({});
   useEffect(() => {
     const savedConfig = localStorage.getItem(STORAGE_KEY);
     if (savedConfig) {
@@ -144,11 +322,11 @@ export default function App() {
   // Handle Theme Switching
   useEffect(() => {
     const root = window.document.documentElement;
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      root.classList.toggle('dark', systemTheme === 'dark');
-    } else {
-      root.classList.toggle('dark', theme === 'dark');
+    root.classList.remove('dark', 'blue');
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else if (theme === 'blue') {
+      root.classList.add('blue');
     }
   }, [theme]);
 
@@ -410,6 +588,45 @@ export default function App() {
     }
   };
 
+  const regenerateSingleFile = async (id: string) => {
+    const fileMetadata = files.find(f => f.id === id);
+    if (!fileMetadata || fileMetadata.status === 'generating') return;
+
+    const currentKey = apiConfig[activeKey.provider][activeKey.index];
+    if (!currentKey) {
+      showNotification("Selected API Key is empty. Please configure it in settings.", 'error');
+      return;
+    }
+
+    const actualFile = fileObjects[id];
+    if (!actualFile) {
+      showNotification("Original file data not found. Please re-upload.", 'error');
+      return;
+    }
+
+    setFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'generating' } : f));
+
+    try {
+      const result = await generateMetadata(actualFile, settings, { [activeKey.provider]: currentKey });
+      setFiles(prev => prev.map(f => {
+        if (f.id === id) {
+          const extension = f.filename.split('.').pop() || f.fileType;
+          return { 
+            ...f, 
+            ...result, 
+            filename: `${formatFilename(result.title)}.${extension}`,
+            status: 'completed' 
+          };
+        }
+        return f;
+      }));
+      showNotification(`Regenerated ${fileMetadata.filename}`, 'success');
+    } catch (error) {
+      setFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'error' } : f));
+      showNotification(`Failed to regenerate ${fileMetadata.filename}`, 'error');
+    }
+  };
+
   const startGeneration = async () => {
     if (isGenerating) return;
     
@@ -427,43 +644,47 @@ export default function App() {
     setProgress({ current: 0, total: pendingFiles.length });
 
     // Parallel generation for maximum speed (concurrency from settings)
-    const concurrency = settings.concurrency || 3;
-    const chunks = [];
-    for (let i = 0; i < pendingFiles.length; i += concurrency) {
-      chunks.push(pendingFiles.slice(i, i + concurrency));
-    }
-
-    for (const chunk of chunks) {
-      if (stopRef.current) break;
+    const concurrency = settings.concurrency || 10; // Increased default concurrency
+    const pending = [...pendingFiles];
+    const active = new Set();
+    
+    const processNext = async () => {
+      if (stopRef.current || pending.length === 0) return;
       
-      await Promise.all(chunk.map(async (fileMetadata) => {
-        if (stopRef.current) return;
+      const fileMetadata = pending.shift()!;
+      active.add(fileMetadata.id);
+      
+      const actualFile = fileObjects[fileMetadata.id];
+      setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'generating' } : f));
+
+      try {
+        const result = await generateMetadata(actualFile, settings, { [activeKey.provider]: currentKey });
         
-        const actualFile = fileObjects[fileMetadata.id];
-        setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'generating' } : f));
+        setFiles(prev => prev.map(f => {
+          if (f.id === fileMetadata.id) {
+            const extension = f.filename.split('.').pop() || f.fileType;
+            return { 
+              ...f, 
+              ...result, 
+              filename: `${formatFilename(result.title)}.${extension}`,
+              status: 'completed' 
+            };
+          }
+          return f;
+        }));
 
-        try {
-          const result = await generateMetadata(actualFile, settings, { [activeKey.provider]: currentKey });
-          
-          setFiles(prev => prev.map(f => {
-            if (f.id === fileMetadata.id) {
-              const extension = f.filename.split('.').pop() || f.fileType;
-              return { 
-                ...f, 
-                ...result, 
-                filename: `${formatFilename(result.title)}.${extension}`,
-                status: 'completed' 
-              };
-            }
-            return f;
-          }));
+        setProgress(prev => ({ ...prev, current: prev.current + 1 }));
+      } catch (error) {
+        setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'error' } : f));
+      } finally {
+        active.delete(fileMetadata.id);
+        await processNext();
+      }
+    };
 
-          setProgress(prev => ({ ...prev, current: prev.current + 1 }));
-        } catch (error) {
-          setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'error' } : f));
-        }
-      }));
-    }
+    // Start initial batch
+    const initialBatch = Array.from({ length: Math.min(concurrency, pending.length) }, () => processNext());
+    await Promise.all(initialBatch);
 
     // Save to history
     const newHistoryItem: HistoryItem = {
@@ -565,7 +786,57 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  const handleEmbed = async (type: 'image' | 'video' | 'eps') => {
+    const completedFiles = files.filter(f => {
+      const ext = f.fileType.toLowerCase();
+      if (type === 'image') return ['jpg', 'jpeg', 'png'].includes(ext);
+      if (type === 'video') return ['mp4', 'mov', 'avi'].includes(ext);
+      if (type === 'eps') return ['eps', 'ai', 'svg'].includes(ext);
+      return false;
+    }).filter(f => f.status === 'completed');
+
+    if (completedFiles.length === 0) {
+      showNotification(`No completed ${type.toUpperCase()} files to embed.`, 'info');
+      return;
+    }
+
+    showNotification(`Embedding metadata for ${completedFiles.length} ${type.toUpperCase()} files...`, 'info');
+
+    for (const file of completedFiles) {
+      try {
+        await saveMetadataToLocalFile(file.id, file);
+        
+        // Special logic for EPS: Save a preview image if possible
+        if (type === 'eps' && directoryHandle) {
+          try {
+            // Simulate saving a preview image (just a placeholder for now as we can't convert EPS in browser easily)
+            const previewHandle = await directoryHandle.getFileHandle(`${file.filename}_preview.jpg`, { create: true });
+            const response = await fetch('https://picsum.photos/seed/eps_preview/800/600');
+            const blob = await response.blob();
+            const writable = await previewHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+          } catch (e) {
+            console.error("Failed to save EPS preview:", e);
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to embed ${type}:`, err);
+      }
+    }
+
+    // Attempt to "open" the application via protocol (this is hit-or-miss but requested)
+    if (type === 'eps') {
+      window.location.href = 'illustrator://';
+    } else if (type === 'image') {
+      window.location.href = 'photoshop://';
+    }
+
+    showNotification(`${type.toUpperCase()} Embedding Complete!`, 'success');
+  };
+
   const filteredFiles = useMemo(() => {
+    if (settings.metadataFor === 'all') return files;
     return files.filter(f => {
       const ext = f.fileType.toLowerCase();
       if (settings.metadataFor === 'image') return ['jpg', 'jpeg', 'png'].includes(ext);
@@ -694,10 +965,7 @@ export default function App() {
     const newItems: StockMetadata[] = [];
     const filesArray = Array.from(fileList);
     
-    const allowedExtensions = settings.metadataFor === 'image' ? ['jpg', 'jpeg', 'png'] :
-                             settings.metadataFor === 'video' ? ['mp4', 'mov'] :
-                             settings.metadataFor === 'eps' ? ['eps'] :
-                             ['jpg', 'jpeg', 'png', 'eps', 'mp4', 'mov'];
+    const allowedExtensions = ['jpg', 'jpeg', 'png', 'eps', 'mp4', 'mov'];
 
     filesArray.forEach(file => {
       const ext = file.name.split('.').pop()?.toLowerCase() || '';
@@ -747,7 +1015,27 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden font-sans selection:bg-blue-500/30 transition-colors duration-300">
+    <div 
+      className="flex flex-col h-screen bg-background text-foreground overflow-hidden font-sans selection:bg-blue-500/30 transition-colors duration-300 relative"
+      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={onDrop}
+    >
+      {/* Drag Overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-[200] bg-blue-600/20 backdrop-blur-sm border-4 border-dashed border-blue-500 flex items-center justify-center pointer-events-none animate-in fade-in duration-200">
+          <div className="bg-background/90 p-8 rounded-2xl shadow-2xl border border-blue-500/50 flex flex-col items-center gap-4 scale-110 transition-transform">
+            <div className="w-20 h-20 bg-blue-500 rounded-full flex items-center justify-center shadow-lg shadow-blue-500/30">
+              <Upload size={40} className="text-white animate-bounce" />
+            </div>
+            <div className="text-center">
+              <h2 className="text-xl font-black uppercase tracking-tighter">Drop Files to Upload</h2>
+              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-1">Images, Videos, and EPS Vectors</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Notification Toast */}
       {notification && (
         <div className={cn(
@@ -768,6 +1056,22 @@ export default function App() {
 
       {/* Main Header */}
       <header className="bg-secondary border-b border-border z-40 shadow-xl relative text-foreground">
+        {/* Top Branding Bar */}
+        <div className="flex items-center px-4 py-1.5 bg-background border-b border-border/50">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 bg-blue-600 rounded flex items-center justify-center shadow-lg shadow-blue-500/20">
+              <Sparkles size={14} className="text-white" />
+            </div>
+            <h1 className="text-[11px] font-black uppercase tracking-[0.2em] text-foreground">
+              SS <span className="text-blue-500">Smart Meta</span>
+            </h1>
+          </div>
+          <div className="flex-1" />
+          <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest opacity-50">
+            Professional Metadata Engine
+          </div>
+        </div>
+
         {/* Ribbon Actions (The Buttons Area) */}
         <div className="flex flex-col bg-muted">
           {/* Controls Bar */}
@@ -801,7 +1105,7 @@ export default function App() {
               >
                 <option value="dark">Dark</option>
                 <option value="light">Light</option>
-                <option value="system">System</option>
+                <option value="blue">Blue</option>
               </select>
             </div>
 
@@ -845,21 +1149,21 @@ export default function App() {
             <div className="flex items-center gap-2 pr-4 border-r border-border/50">
               <button 
                 onClick={() => document.getElementById('file-upload')?.click()}
-                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-foreground/5 rounded transition-all group cursor-pointer"
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-white/10 rounded-md transition-all group cursor-pointer border border-transparent hover:border-white/5 shadow-sm"
               >
-                <div className="p-1 text-blue-400 group-hover:scale-110 transition-transform">
+                <div className="p-1 text-blue-400 group-hover:scale-110 group-hover:text-blue-300 transition-all">
                   <Plus size={18} strokeWidth={2.5} />
                 </div>
-                <span className="text-[9px] font-medium text-muted-foreground">Add Files</span>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Add Files</span>
               </button>
               <button 
                 onClick={() => document.getElementById('folder-upload')?.click()}
-                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-foreground/5 rounded transition-all group cursor-pointer"
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-white/10 rounded-md transition-all group cursor-pointer border border-transparent hover:border-white/5 shadow-sm"
               >
-                <div className="p-1 text-amber-400 group-hover:scale-110 transition-transform">
+                <div className="p-1 text-amber-400 group-hover:scale-110 group-hover:text-amber-300 transition-all">
                   <FolderPlus size={18} strokeWidth={2.5} />
                 </div>
-                <span className="text-[9px] font-medium text-muted-foreground">Add Folder</span>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Add Folder</span>
               </button>
             </div>
 
@@ -868,12 +1172,25 @@ export default function App() {
               <button 
                 onClick={startGeneration}
                 disabled={isGenerating || files.length === 0}
-                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-foreground/5 rounded transition-all group cursor-pointer disabled:opacity-30"
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-emerald-500/10 rounded-md transition-all group cursor-pointer disabled:opacity-30 border border-transparent hover:border-emerald-500/20 shadow-sm"
               >
-                <div className="p-1 text-emerald-400 group-hover:scale-110 transition-transform">
+                <div className="p-1 text-emerald-400 group-hover:scale-110 group-hover:text-emerald-300 transition-all">
                   {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} className="fill-current" />}
                 </div>
-                <span className="text-[9px] font-medium text-muted-foreground">Generate</span>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Generate</span>
+              </button>
+              <button 
+                onClick={() => {
+                  setFiles(prev => prev.map(f => f.status === 'error' ? { ...f, status: 'pending' } : f));
+                  setTimeout(startGeneration, 100);
+                }}
+                disabled={isGenerating || !files.some(f => f.status === 'error')}
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-amber-500/10 rounded-md transition-all group cursor-pointer disabled:opacity-30 border border-transparent hover:border-amber-500/20 shadow-sm"
+              >
+                <div className="p-1 text-amber-400 group-hover:scale-110 group-hover:text-amber-300 transition-all">
+                  <RefreshCw size={18} strokeWidth={2.5} />
+                </div>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Retry Errors</span>
               </button>
               <button 
                 onClick={() => {
@@ -881,21 +1198,21 @@ export default function App() {
                   setIsGenerating(false);
                 }}
                 disabled={!isGenerating}
-                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-foreground/5 rounded transition-all group cursor-pointer disabled:opacity-30"
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-rose-500/10 rounded-md transition-all group cursor-pointer disabled:opacity-30 border border-transparent hover:border-rose-500/20 shadow-sm"
               >
-                <div className="p-1 text-rose-400 group-hover:scale-110 transition-transform">
+                <div className="p-1 text-rose-400 group-hover:scale-110 group-hover:text-rose-300 transition-all">
                   <Square size={16} className="fill-current" />
                 </div>
-                <span className="text-[9px] font-medium text-muted-foreground">Stop</span>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Stop</span>
               </button>
               <button 
                 onClick={clearAll}
-                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-foreground/5 rounded transition-all group cursor-pointer"
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-rose-500/10 rounded-md transition-all group cursor-pointer border border-transparent hover:border-rose-500/20 shadow-sm"
               >
-                <div className="p-1 text-rose-400 group-hover:scale-110 transition-transform">
+                <div className="p-1 text-rose-400 group-hover:scale-110 group-hover:text-rose-300 transition-all">
                   <Trash2 size={18} strokeWidth={2.5} />
                 </div>
-                <span className="text-[9px] font-medium text-muted-foreground">Clear</span>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Clear</span>
               </button>
             </div>
 
@@ -903,12 +1220,46 @@ export default function App() {
             <div className="flex items-center gap-2 px-2 border-r border-border">
               <button 
                 onClick={() => handleExport('csv')}
-                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-foreground/5 rounded transition-all group cursor-pointer"
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-cyan-500/10 rounded-md transition-all group cursor-pointer border border-transparent hover:border-cyan-500/20 shadow-sm"
               >
-                <div className="p-1 text-cyan-400 group-hover:scale-110 transition-transform">
+                <div className="p-1 text-cyan-400 group-hover:scale-110 group-hover:text-cyan-300 transition-all">
                   <FileSpreadsheet size={18} strokeWidth={2.5} />
                 </div>
-                <span className="text-[9px] font-medium text-muted-foreground">Export CSV</span>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Export CSV</span>
+              </button>
+            </div>
+
+            {/* Embed Actions Group */}
+            <div className="flex items-center gap-2 px-2 border-r border-border">
+              <button 
+                onClick={() => handleEmbed('image')}
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-indigo-500/10 rounded-md transition-all group cursor-pointer border border-transparent hover:border-indigo-500/20 shadow-sm"
+                title="Embed Metadata & Open Photoshop"
+              >
+                <div className="p-1 text-indigo-400 group-hover:scale-110 group-hover:text-indigo-300 transition-all">
+                  <FileImage size={18} strokeWidth={2.5} />
+                </div>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Img Embed</span>
+              </button>
+              <button 
+                onClick={() => handleEmbed('eps')}
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-orange-500/10 rounded-md transition-all group cursor-pointer border border-transparent hover:border-orange-500/20 shadow-sm"
+                title="Embed Metadata & Open Illustrator"
+              >
+                <div className="p-1 text-orange-400 group-hover:scale-110 group-hover:text-orange-300 transition-all">
+                  <Layers size={18} strokeWidth={2.5} />
+                </div>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">EPS Embed</span>
+              </button>
+              <button 
+                onClick={() => handleEmbed('video')}
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-emerald-500/10 rounded-md transition-all group cursor-pointer border border-transparent hover:border-emerald-500/20 shadow-sm"
+                title="Auto Embed Video Metadata"
+              >
+                <div className="p-1 text-emerald-400 group-hover:scale-110 group-hover:text-emerald-300 transition-all">
+                  <Video size={18} strokeWidth={2.5} />
+                </div>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Vid Embed</span>
               </button>
             </div>
 
@@ -916,21 +1267,21 @@ export default function App() {
             <div className="flex items-center gap-2 px-2">
               <button 
                 onClick={() => setIsHistoryOpen(true)}
-                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-foreground/5 rounded transition-all group cursor-pointer"
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-white/10 rounded-md transition-all group cursor-pointer border border-transparent hover:border-white/5 shadow-sm"
               >
-                <div className="p-1 text-muted-foreground group-hover:scale-110 transition-transform">
+                <div className="p-1 text-muted-foreground group-hover:scale-110 group-hover:text-foreground transition-all">
                   <HistoryIcon size={18} strokeWidth={2.5} />
                 </div>
-                <span className="text-[9px] font-medium text-muted-foreground">History</span>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">History</span>
               </button>
               <button 
                 onClick={() => setIsSettingsOpen(true)}
-                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-foreground/5 rounded transition-all group cursor-pointer"
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-white/10 rounded-md transition-all group cursor-pointer border border-transparent hover:border-white/5 shadow-sm"
               >
-                <div className="p-1 text-muted-foreground group-hover:scale-110 transition-transform">
+                <div className="p-1 text-muted-foreground group-hover:scale-110 group-hover:text-foreground transition-all">
                   <Settings size={18} strokeWidth={2.5} />
                 </div>
-                <span className="text-[9px] font-medium text-muted-foreground">Settings</span>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Settings</span>
               </button>
             </div>
           </div>
@@ -941,6 +1292,7 @@ export default function App() {
               <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Asset Type:</span>
               <div className="flex bg-muted rounded-sm overflow-hidden border border-border p-0.5">
                 {[
+                  { id: 'all', label: 'All', icon: Database },
                   { id: 'image', label: 'Image', icon: FileImage },
                   { id: 'video', label: 'Video', icon: Video },
                   { id: 'eps', label: 'EPS', icon: Layers }
@@ -949,8 +1301,8 @@ export default function App() {
                     key={item.id}
                     onClick={() => setSettings(prev => ({ ...prev, metadataFor: item.id as any }))}
                     className={cn(
-                      "flex items-center gap-1.5 px-3 py-1 text-[9px] font-bold uppercase tracking-widest rounded-sm transition-all",
-                      settings.metadataFor === item.id ? "bg-blue-600 text-white" : "text-muted-foreground hover:bg-muted"
+                      "flex items-center gap-1.5 px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-sm transition-all",
+                      settings.metadataFor === item.id ? "bg-blue-500 text-white shadow-md shadow-blue-500/20" : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
                     )}
                   >
                     <item.icon size={10} />
@@ -983,9 +1335,9 @@ export default function App() {
 
             <button 
               onClick={() => handleExport(selectedExportSite)}
-              className="px-3 py-1 rounded bg-blue-600/20 text-blue-400 border border-blue-500/30 text-[9px] font-bold uppercase tracking-wider hover:bg-blue-600/30 transition-all flex items-center gap-1.5"
+              className="px-3 py-1 rounded bg-blue-500 text-white border border-blue-400 text-[9px] font-black uppercase tracking-widest hover:bg-blue-400 hover:scale-105 active:scale-95 transition-all flex items-center gap-1.5 shadow-lg shadow-blue-500/20"
             >
-              <Download size={10} />
+              <Download size={10} strokeWidth={3} />
               Download CSV
             </button>
 
@@ -1064,130 +1416,17 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <div className="divide-y divide-border">
-              {filteredFiles.map(file => (
-                <div 
-                  key={file.id}
-                  className={cn(
-                    "flex flex-row w-full hover:bg-blue-500/5 transition-colors group min-h-[45px] items-center border-b border-border",
-                    file.status === 'generating' && "bg-blue-500/10"
-                  )}
-                >
-                  <div className="w-[12%] px-3 py-1.5 border-r border-border flex items-center gap-2 overflow-hidden shrink-0">
-                    <div className="w-8 h-8 bg-muted rounded border border-border flex-shrink-0 overflow-hidden relative shadow-sm">
-                      {file.previewUrl ? (
-                        <img src={file.previewUrl} alt="" className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                          <FileText size={14} />
-                        </div>
-                      )}
-                      {file.status === 'completed' && (
-                        <div className="absolute inset-0 bg-emerald-500/10 flex items-center justify-center">
-                          <CheckCircle2 size={14} className="text-emerald-500" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[10px] font-bold text-muted-foreground truncate leading-none uppercase">{file.filename}</div>
-                      <div className="flex items-center gap-1 mt-1">
-                        <span className={cn(
-                          "text-[7px] font-black px-1 py-0.5 rounded uppercase tracking-widest border",
-                          file.status === 'completed' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                          file.status === 'generating' ? "bg-blue-500/10 text-blue-400 border-blue-500/20 animate-pulse" :
-                          file.status === 'error' ? "bg-red-500/10 text-red-400 border-red-500/20" : "bg-muted text-muted-foreground border-border"
-                        )}>
-                          {file.status}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="w-[15%] px-3 py-1.5 border-r border-border h-full shrink-0 relative group/cell">
-                    <textarea 
-                      value={file.title}
-                      onChange={(e) => updateFile(file.id, { title: e.target.value })}
-                      className="w-full h-full bg-secondary border border-border rounded p-2 text-[10px] text-blue-400 resize-none focus:ring-1 focus:ring-blue-500 outline-none custom-scrollbar leading-tight placeholder:text-muted-foreground/30 uppercase font-bold"
-                      placeholder="TITLE..."
-                    />
-                    <button 
-                      onClick={() => copyToClipboard(file.title)}
-                      className="absolute top-2 right-4 p-1 bg-muted border border-border rounded opacity-0 group-hover/cell:opacity-100 transition-opacity hover:bg-accent shadow-lg"
-                      title="COPY TITLE"
-                    >
-                      <Copy size={10} className="text-muted-foreground" />
-                    </button>
-                  </div>
-
-                  <div className="w-[25%] px-3 py-1.5 border-r border-border h-full relative shrink-0 group/cell">
-                    <textarea 
-                      value={file.keywords}
-                      onChange={(e) => updateFile(file.id, { keywords: e.target.value })}
-                      className="w-full h-full bg-secondary border border-border rounded p-2 text-[10px] text-orange-400 resize-none focus:ring-1 focus:ring-blue-500 outline-none custom-scrollbar leading-tight placeholder:text-muted-foreground/30 uppercase font-bold"
-                      placeholder="KEYWORDS..."
-                    />
-                    <button 
-                      onClick={() => copyToClipboard(file.keywords)}
-                      className="absolute top-2 right-4 p-1 bg-muted border border-border rounded opacity-0 group-hover/cell:opacity-100 transition-opacity hover:bg-accent shadow-lg"
-                      title="COPY KEYWORDS"
-                    >
-                      <Copy size={10} className="text-muted-foreground" />
-                    </button>
-                    {file.keywordScore && (
-                      <div className="absolute bottom-1 right-4 text-[6px] font-black text-blue-400 bg-blue-500/10 px-1 py-0.25 rounded border border-blue-500/20">
-                        {file.keywordScore}%
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="w-[20%] px-3 py-1.5 border-r border-border h-full shrink-0 relative group/cell">
-                    <textarea 
-                      value={file.description}
-                      onChange={(e) => updateFile(file.id, { description: e.target.value })}
-                      className="w-full h-full bg-secondary border border-border rounded p-2 text-[10px] text-emerald-400 resize-none focus:ring-1 focus:ring-blue-500 outline-none custom-scrollbar leading-tight placeholder:text-muted-foreground/30 uppercase font-bold"
-                      placeholder="DESCRIPTION..."
-                    />
-                    <button 
-                      onClick={() => copyToClipboard(file.description)}
-                      className="absolute top-2 right-4 p-1 bg-muted border border-border rounded opacity-0 group-hover/cell:opacity-100 transition-opacity hover:bg-accent shadow-lg"
-                      title="COPY DESCRIPTION"
-                    >
-                      <Copy size={10} className="text-muted-foreground" />
-                    </button>
-                  </div>
-
-                  <div className="w-[10%] px-3 py-1.5 border-r border-border h-full shrink-0 relative group/cell">
-                    <input 
-                      type="text"
-                      value={file.category || ''}
-                      onChange={(e) => updateFile(file.id, { category: e.target.value })}
-                      className="w-full h-full bg-secondary border border-border rounded px-2 text-[10px] text-foreground focus:ring-1 focus:ring-blue-500 outline-none placeholder:text-muted-foreground/30 uppercase font-bold"
-                      placeholder="CATEGORY..."
-                    />
-                  </div>
-
-                  <div className="w-[8%] px-3 py-1.5 border-r border-border h-full shrink-0 flex items-center justify-center">
-                    <span className="text-[10px] font-bold text-muted-foreground">{file.keywords ? file.keywords.split(',').length : 0}</span>
-                  </div>
-
-                  <div className="w-[10%] px-3 py-1.5 h-full shrink-0 flex items-center justify-center">
-                    <div className="flex items-center gap-0.5">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <button 
-                          key={star}
-                          onClick={() => updateFile(file.id, { rating: star })}
-                          className={cn(
-                            "transition-all hover:scale-125",
-                            file.rating >= star ? "text-yellow-500" : "text-muted-foreground/30"
-                          )}
-                        >
-                          <Star size={10} fill={file.rating >= star ? "currentColor" : "none"} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="h-full w-full">
+              <FixedSizeList
+                height={800}
+                itemCount={filteredFiles.length}
+                itemSize={60}
+                width="100%"
+                itemData={filteredFiles}
+                className="custom-scrollbar"
+              >
+                {FileRow}
+              </FixedSizeList>
             </div>
           )}
         </div>
@@ -1271,21 +1510,131 @@ export default function App() {
                               onClick={() => handleTestConnection(provider, idx)}
                               disabled={!key || apiStatus[`${provider}-${idx}`] === 'testing'}
                               className={cn(
-                                "px-3 h-8 rounded-sm text-[9px] font-black uppercase tracking-widest transition-all",
-                                apiStatus[`${provider}-${idx}`] === 'connected' ? "bg-emerald-500 text-white" :
-                                apiStatus[`${provider}-${idx}`] === 'failed' ? "bg-red-500 text-white" :
-                                "bg-muted hover:bg-muted/80 text-muted-foreground"
+                                "px-3 h-8 rounded-sm text-[9px] font-black uppercase tracking-widest transition-all shadow-sm",
+                                apiStatus[`${provider}-${idx}`] === 'connected' ? "bg-emerald-500 text-white shadow-emerald-500/20" :
+                                apiStatus[`${provider}-${idx}`] === 'failed' ? "bg-red-500 text-white shadow-red-500/20" :
+                                "bg-white/10 hover:bg-white/20 text-foreground border border-white/10"
                               )}
                             >
                               {apiStatus[`${provider}-${idx}`] === 'testing' ? '...' : 
                                apiStatus[`${provider}-${idx}`] === 'connected' ? 'READY' : 
                                apiStatus[`${provider}-${idx}`] === 'failed' ? 'FAILED' : 'TEST'}
                             </button>
+                            <button 
+                              onClick={() => {
+                                const newKeys = [...apiConfig[provider]];
+                                newKeys[idx] = '';
+                                setApiConfig(prev => ({ ...prev, [provider]: newKeys }));
+                                setApiStatus(prev => {
+                                  const newStatus = { ...prev };
+                                  delete newStatus[`${provider}-${idx}`];
+                                  return newStatus;
+                                });
+                              }}
+                              className="p-2 h-8 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-sm border border-red-500/20 transition-all"
+                              title="CLEAR KEY"
+                            >
+                              <Trash2 size={12} />
+                            </button>
                           </div>
                         ))}
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* AI Imager Options */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2 border-b border-border pb-1">
+                  <FileImage size={14} />
+                  AI Imager Configuration
+                </h4>
+                <div className="grid grid-cols-1 gap-2">
+                  {[
+                    { id: 'singleWordKeywords', label: 'Single Word Keywords' },
+                    { id: 'silhouette', label: 'Silhouette' },
+                    { id: 'customPromptEnabled', label: 'Custom Prompt' },
+                    { id: 'transparentBackground', label: 'Transparent Background' },
+                    { id: 'prohibitedWords', label: 'Prohibited Words' }
+                  ].map(option => (
+                    <div key={option.id} className="flex items-center justify-between p-2 bg-muted/20 rounded-sm border border-border/50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-foreground uppercase tracking-widest">{option.label}</span>
+                        <Info size={10} className="text-muted-foreground/50" />
+                      </div>
+                      <button 
+                        onClick={() => setSettings(prev => ({ ...prev, [option.id]: !prev[option.id as keyof GeneratorSettings] }))}
+                        className={cn(
+                          "w-8 h-4 rounded-full transition-all relative",
+                          settings[option.id as keyof GeneratorSettings] ? "bg-blue-500" : "bg-muted"
+                        )}
+                      >
+                        <div className={cn(
+                          "absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all shadow-sm",
+                          settings[option.id as keyof GeneratorSettings] ? "left-[18px]" : "left-0.5"
+                        )} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Saved Keywords Section */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2 border-b border-border pb-1">
+                  <Tag size={14} />
+                  Saved Keywords (Persistent)
+                </h4>
+                <div className="space-y-3">
+                  <div className="flex gap-2">
+                    <input 
+                      type="text"
+                      value={newKeyword}
+                      onChange={(e) => setNewKeyword(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newKeyword.trim()) {
+                          setSettings(prev => ({ ...prev, savedKeywords: [...prev.savedKeywords, newKeyword.trim()] }));
+                          setNewKeyword('');
+                        }
+                      }}
+                      placeholder="ADD NEW KEYWORD..."
+                      className="flex-1 bg-secondary border border-border text-[11px] h-8 rounded-sm px-3 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 outline-none transition-all text-foreground uppercase placeholder:text-muted-foreground/30"
+                    />
+                    <button 
+                      onClick={() => {
+                        if (newKeyword.trim()) {
+                          setSettings(prev => ({ ...prev, savedKeywords: [...prev.savedKeywords, newKeyword.trim()] }));
+                          setNewKeyword('');
+                        }
+                      }}
+                      className="px-4 h-8 bg-blue-500 hover:bg-blue-400 text-white text-[9px] font-black uppercase tracking-widest rounded-sm transition-all shadow-lg shadow-blue-500/20"
+                    >
+                      ADD
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 min-h-[40px] p-3 bg-muted/30 rounded-sm border border-border">
+                    {settings.savedKeywords.length === 0 ? (
+                      <span className="text-[9px] text-muted-foreground/50 uppercase italic">No saved keywords...</span>
+                    ) : (
+                      settings.savedKeywords.map((kw, idx) => (
+                        <div key={idx} className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 px-2 py-1 rounded-sm group">
+                          <span className="text-[10px] font-bold text-blue-400 uppercase">{kw}</span>
+                          <button 
+                            onClick={() => {
+                              setSettings(prev => ({
+                                ...prev,
+                                savedKeywords: prev.savedKeywords.filter((_, i) => i !== idx)
+                              }));
+                            }}
+                            className="text-muted-foreground hover:text-red-400 transition-colors"
+                          >
+                            <X size={10} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1309,7 +1658,7 @@ export default function App() {
                           onClick={() => setSettings(prev => ({ ...prev, promptMode: mode.id as any }))}
                           className={cn(
                             "flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-sm transition-all", 
-                            settings.promptMode === mode.id ? "bg-blue-600 text-white shadow-sm" : "hover:bg-muted text-muted-foreground"
+                            settings.promptMode === mode.id ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "hover:bg-white/5 text-muted-foreground hover:text-foreground"
                           )}
                         >
                           {mode.label}
@@ -1418,7 +1767,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="space-y-4">
+              <div className={cn("space-y-4 transition-all duration-300", !settings.customPromptEnabled && "opacity-30 pointer-events-none grayscale")}>
                 <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">CUSTOM GLOBAL INSTRUCTIONS</label>
                 <textarea 
                   value={settings.customPrompt}
@@ -1432,7 +1781,7 @@ export default function App() {
             <div className="p-4 bg-muted border-t border-border flex justify-end">
               <button 
                 onClick={() => setIsSettingsOpen(false)}
-                className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black px-8 py-2 rounded-sm transition-all shadow-lg uppercase tracking-widest"
+                className="bg-blue-500 hover:bg-blue-400 text-white text-[10px] font-black px-8 py-2 rounded-md transition-all shadow-xl shadow-blue-500/20 uppercase tracking-widest active:scale-95"
               >
                 SAVE & CLOSE
               </button>
@@ -1469,7 +1818,7 @@ export default function App() {
                     </div>
                     <button 
                       onClick={() => { setFiles(item.files); setIsHistoryOpen(false); }}
-                      className="text-[10px] font-black bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-sm transition-all shadow-lg uppercase tracking-widest"
+                      className="text-[10px] font-black bg-blue-500 hover:bg-blue-400 text-white px-4 py-2 rounded-md transition-all shadow-lg shadow-blue-500/20 uppercase tracking-widest active:scale-95"
                     >
                       RESTORE BATCH
                     </button>
@@ -1495,12 +1844,7 @@ export default function App() {
         multiple 
         className="hidden" 
         onChange={(e) => e.target.files && handleFilesAdded(e.target.files)}
-        accept={
-          settings.metadataFor === 'image' ? ".jpg,.jpeg,.png" :
-          settings.metadataFor === 'video' ? ".mp4,.mov" :
-          settings.metadataFor === 'eps' ? ".eps" :
-          ".jpg,.jpeg,.png,.eps,.mp4,.mov"
-        }
+        accept=".jpg,.jpeg,.png,.eps,.mp4,.mov"
       />
       <input 
         type="file" 

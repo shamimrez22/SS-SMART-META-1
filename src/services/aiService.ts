@@ -200,7 +200,27 @@ async function fileToBase64(file: File): Promise<string> {
 }
 
 function getPrompt(settings: any, filename: string) {
-  const { titleWords, descriptionLength, keywordCount, promptMode, customPrompt, metadataFor, titleChoice, minTitleWords, maxTitleWords, minDescriptionWords, maxDescriptionWords, minKeywords, maxKeywords } = settings;
+  const { 
+    titleWords, 
+    descriptionLength, 
+    keywordCount, 
+    promptMode, 
+    customPrompt, 
+    metadataFor, 
+    titleChoice, 
+    minTitleWords, 
+    maxTitleWords, 
+    minDescriptionWords, 
+    maxDescriptionWords, 
+    minKeywords, 
+    maxKeywords,
+    singleWordKeywords,
+    silhouette,
+    transparentBackground,
+    prohibitedWords,
+    customPromptEnabled,
+    savedKeywords
+  } = settings;
   
   let basePrompt = `Analyze the ${metadataFor || 'file'} named "${filename}" and generate stock marketplace metadata.
   Return a JSON object with keys: "title", "description", "keywords", "category", "rating", "analysis".
@@ -214,6 +234,13 @@ function getPrompt(settings: any, filename: string) {
   - Category: Provide a single relevant category for stock marketplace (e.g., Nature, Technology, People, Business, etc.).
   - Rating: ALWAYS provide a rating of 5.
   
+  Specific Instructions:
+  ${singleWordKeywords ? "- Use ONLY single-word keywords. No phrases." : "- Use a mix of single-word and short phrase keywords."}
+  ${silhouette ? "- This asset is a SILHOUETTE. Ensure the metadata reflects this style." : ""}
+  ${transparentBackground ? "- This asset has a TRANSPARENT BACKGROUND (isolated). Mention 'isolated', 'transparent', 'white background' where appropriate." : ""}
+  ${prohibitedWords ? "- AVOID prohibited words: 'AI', 'Generated', 'Fake', 'Mockup', 'Template', 'Sample', 'Stock', 'Download'." : ""}
+  ${savedKeywords && savedKeywords.length > 0 ? `- MANDATORY KEYWORDS to include if relevant: ${savedKeywords.join(', ')}` : ""}
+
   IMPORTANT: 
   - DO NOT use irrelevant technical jargon like "UX", "UI", "Interface", "Web Design" unless the image specifically shows a user interface.
   - Focus on descriptive, visual, and conceptual keywords that describe the content of the image/video.
@@ -224,7 +251,9 @@ function getPrompt(settings: any, filename: string) {
     basePrompt += "\nOptimize specifically for Adobe Stock guidelines (descriptive, no spam).";
   } else if (promptMode === 'shutterstock') {
     basePrompt += "\nOptimize specifically for Shutterstock guidelines (concise, high-relevance).";
-  } else if (promptMode === 'custom') {
+  }
+
+  if (customPromptEnabled && customPrompt) {
     basePrompt += `\nAdditional Instructions: ${customPrompt}`;
   }
 
