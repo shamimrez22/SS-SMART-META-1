@@ -218,19 +218,53 @@ function getPrompt(settings: any, filename: string) {
     savedKeywords
   } = settings;
   
-  return `Act as a stock metadata expert. Analyze "${filename}" (${metadataFor || 'file'}).
-  Output JSON: {"title": "string", "description": "string", "keywords": "string", "category": "string", "rating": 5, "analysis": {"theme": "string", "subject": "string", "objects": [], "colors": [], "concepts": []}}
+  return `Act as a World-Class Stock Photography SEO Expert. Your goal is to generate 100% ACCURATE and SEO-OPTIMIZED metadata for the file "${filename}" (${metadataFor || 'asset'}).
 
-  Rules:
-  - Title: ${titleChoice || 1} option, ${minTitleWords}-${maxTitleWords} words.
-  - Description: ${minDescriptionWords}-${maxDescriptionWords} words.
-  - Keywords: EXACTLY ${maxKeywords || 50} relevant keywords, comma-separated.
-  - Category: One stock category.
-  ${singleWordKeywords ? "- Keywords: Single words only." : "- Keywords: Mix of words/phrases."}
-  ${silhouette ? "- Style: Silhouette." : ""}
-  ${transparentBackground ? "- Style: Isolated/Transparent background." : ""}
-  ${prohibitedWords ? "- Prohibited: AI, Generated, Fake, Mockup, Template, Stock." : ""}
-  ${savedKeywords?.length ? `- Include: ${savedKeywords.join(', ')}` : ""}
-  ${customPromptEnabled && customPrompt ? `- Extra: ${customPrompt}` : ""}
-  `;
+  OUTPUT JSON FORMAT:
+  {
+    "title": "Primary SEO Title",
+    "description": "Detailed descriptive sentence",
+    "keywords": "keyword1, keyword2, ...",
+    "category": "Marketplace Category",
+    "rating": 5,
+    "analysis": {
+      "theme": "Overall theme",
+      "subject": "Main subject",
+      "objects": ["object1", "object2"],
+      "colors": ["color1", "color2"],
+      "concepts": ["concept1", "concept2"]
+    }
+  }
+
+  STRICT SEO GUIDELINES:
+  1. TITLE: 
+     - Must be a clear, literal description of what is visible. 
+     - Place the most important keywords at the START.
+     - Length: ${minTitleWords}-${maxTitleWords} words.
+     - NO keyword stuffing. Use natural, searchable phrases.
+  
+  2. DESCRIPTION:
+     - Write a complete, professional sentence.
+     - Describe the subject, action, and environment in detail.
+     - Length: ${minDescriptionWords}-${maxDescriptionWords} words.
+
+  3. KEYWORDS:
+     - Provide EXACTLY ${maxKeywords || 50} keywords.
+     - ORDER BY RELEVANCE: Most critical keywords MUST come first.
+     - Be specific (e.g., use "Golden Retriever" instead of just "dog").
+     - Include conceptual keywords (e.g., "freedom", "success", "growth").
+     ${singleWordKeywords ? "- Use ONLY single-word keywords." : "- Use a mix of specific single words and highly relevant 2-3 word phrases."}
+
+  4. ACCURACY:
+     - DO NOT hallucinate. Only describe what is actually in the file.
+     - If it's a photo, describe it as a photo. If it's an illustration, say so.
+     ${silhouette ? "- This is a SILHOUETTE. Focus on shape, outline, and contrast." : ""}
+     ${transparentBackground ? "- This is an ISOLATED asset on a TRANSPARENT/WHITE background. Include keywords like 'isolated', 'cut out', 'transparent'." : ""}
+     ${prohibitedWords ? "- FORBIDDEN WORDS: AI, Generated, Fake, Mockup, Template, Stock, Download, High Quality." : ""}
+  
+  5. CONTEXT:
+     ${savedKeywords?.length ? `- MANDATORY KEYWORDS TO INTEGRATE: ${savedKeywords.join(', ')}` : ""}
+     ${customPromptEnabled && customPrompt ? `- USER SPECIFIC INSTRUCTIONS: ${customPrompt}` : ""}
+
+  Marketplace Optimization: Ensure the metadata follows Adobe Stock and Shutterstock best practices for maximum discoverability.`;
 }
