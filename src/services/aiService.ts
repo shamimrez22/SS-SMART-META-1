@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 export async function testApiConnection(provider: 'gemini' | 'groq' | 'mistral', apiKey: string): Promise<{ success: boolean; message?: string }> {
   try {
@@ -94,51 +94,84 @@ async function generateWithGemini(file: File, settings: any, apiKey: string) {
   const parts: any[] = [{ text: getPrompt(settings, file?.name || "unnamed_file") }];
 
   if (file && file.type.startsWith('image/')) {
-    const base64Data = await fileToBase64(file);
-    parts.push({
-      inlineData: {
-        data: base64Data.split(',')[1],
-        mimeType: file.type
-      }
-    });
-  }
-
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: [{ parts }],
-    config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING },
-          description: { type: Type.STRING },
-          keywords: { type: Type.STRING },
-          category: { type: Type.STRING },
-          rating: { type: Type.NUMBER },
-          analysis: {
-            type: Type.OBJECT,
-            properties: {
-              theme: { type: Type.STRING },
-              subject: { type: Type.STRING },
-              objects: { type: Type.ARRAY, items: { type: Type.STRING } },
-              colors: { type: Type.ARRAY, items: { type: Type.STRING } },
-              concepts: { type: Type.ARRAY, items: { type: Type.STRING } }
-            }
+    try {
+      const resizedBase64 = await resizeImage(file, 800, 800);
+      parts.push({
+        inlineData: {
+          data: resizedBase64.split(',')[1],
+          mimeType: 'image/jpeg'
+        }
+      });
+    } catch (e) {
+      console.error("Error resizing image:", e);
+      // Fallback to original if resizing fails
+      try {
+        const base64Data = await fileToBase64(file);
+        parts.push({
+          inlineData: {
+            data: base64Data.split(',')[1],
+            mimeType: file.type
           }
-        },
-        required: ["title", "description", "keywords", "category", "rating", "analysis"]
+        });
+      } catch (err) {
+        console.error("Error converting file to base64:", err);
       }
     }
-  });
-
-  const result = JSON.parse(response.text || "{}");
-  if (settings.optimizeKeywords) {
-    result.keywords = optimizeKeywords(result.keywords, settings.maxKeywords || 50);
-    result.keywordScore = calculateKeywordScore(result.keywords, settings.minKeywords || 20);
   }
-  return result;
+
+  console.log("Starting Gemini generation for:", file?.name);
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{ parts }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            description: { type: Type.STRING },
+            keywords: { type: Type.STRING },
+            category: { type: Type.STRING },
+            rating: { type: Type.NUMBER },
+            analysis: {
+              type: Type.OBJECT,
+              properties: {
+                theme: { type: Type.STRING },
+                subject: { type: Type.STRING },
+                objects: { type: Type.ARRAY, items: { type: Type.STRING } },
+                colors: { type: Type.ARRAY, items: { type: Type.STRING } },
+                concepts: { type: Type.ARRAY, items: { type: Type.STRING } }
+              }
+            }
+          },
+          required: ["title", "description", "keywords", "category", "rating", "analysis"]
+        }
+      }
+    });
+
+    console.log("Gemini response received:", response);
+    let result: any = {};
+    try {
+      const text = response.text || "{}";
+      // Clean up potential markdown code blocks if the model returned them
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const cleanJson = jsonMatch ? jsonMatch[0] : text;
+      result = JSON.parse(cleanJson);
+    } catch (e) {
+      console.error("Failed to parse Gemini JSON response:", e, response.text);
+      throw new Error("Invalid JSON response from AI");
+    }
+    
+    if (settings.optimizeKeywords) {
+      result.keywords = optimizeKeywords(result.keywords, settings.maxKeywords || 50);
+      result.keywordScore = calculateKeywordScore(result.keywords, settings.minKeywords || 20);
+    }
+    return result;
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    throw error;
+  }
 }
 
 async function generateWithOpenAICompatible(file: File, settings: any, apiKey: string, provider: 'groq' | 'mistral') {
@@ -200,6 +233,42 @@ async function fileToBase64(file: File): Promise<string> {
   });
 }
 
+async function resizeImage(file: File, maxWidth: number, maxHeight: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height *= maxWidth / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width *= maxHeight / height;
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = reject;
+    };
+    reader.onerror = reject;
+  });
+}
+
 function getPrompt(settings: any, filename: string) {
   const { 
     metadataFor, 
@@ -218,7 +287,11 @@ function getPrompt(settings: any, filename: string) {
     savedKeywords
   } = settings;
   
-  return `Act as a World-Class Stock Photography SEO Expert. Your goal is to generate 100% ACCURATE and SEO-OPTIMIZED metadata for the file "${filename}" (${metadataFor || 'asset'}).
+  return `Act as a World-Class Stock Photography SEO Expert. 
+  
+  CRITICAL: You are provided with an image/file. You MUST prioritize the VISUAL CONTENT of the image over the filename. The filename "${filename}" is only for reference; the actual content in the image is the primary source of truth.
+
+  Your goal is to generate 100% ACCURATE and SEO-OPTIMIZED metadata for this ${metadataFor || 'asset'}.
 
   OUTPUT JSON FORMAT:
   {
@@ -236,33 +309,37 @@ function getPrompt(settings: any, filename: string) {
     }
   }
 
-  STRICT SEO GUIDELINES:
-  1. TITLE: 
-     - Must be a clear, literal description of what is visible. 
+  STRICT SEO & ACCURACY GUIDELINES:
+  1. VISUAL ANALYSIS:
+     - Look closely at the image. Identify the main subject, background, lighting, and mood.
+     - If the filename contradicts the image, IGNORE the filename and describe the image.
+  
+  2. TITLE: 
+     - Must be a clear, literal description of what is VISUALLY PRESENT. 
      - Place the most important keywords at the START.
      - Length: ${minTitleWords}-${maxTitleWords} words.
      - NO keyword stuffing. Use natural, searchable phrases.
   
-  2. DESCRIPTION:
-     - Write a complete, professional sentence.
+  3. DESCRIPTION:
+     - Write a complete, professional sentence describing the visual scene.
      - Describe the subject, action, and environment in detail.
      - Length: ${minDescriptionWords}-${maxDescriptionWords} words.
 
-  3. KEYWORDS:
+  4. KEYWORDS:
      - Provide EXACTLY ${maxKeywords || 50} keywords.
-     - ORDER BY RELEVANCE: Most critical keywords MUST come first.
+     - ORDER BY RELEVANCE: Most critical visual elements MUST come first.
      - Be specific (e.g., use "Golden Retriever" instead of just "dog").
-     - Include conceptual keywords (e.g., "freedom", "success", "growth").
+     - Include conceptual keywords derived from the visual mood (e.g., "freedom", "success", "growth").
      ${singleWordKeywords ? "- Use ONLY single-word keywords." : "- Use a mix of specific single words and highly relevant 2-3 word phrases."}
 
-  4. ACCURACY:
-     - DO NOT hallucinate. Only describe what is actually in the file.
+  5. ACCURACY:
+     - DO NOT hallucinate. Only describe what is actually VISIBLE in the file.
      - If it's a photo, describe it as a photo. If it's an illustration, say so.
      ${silhouette ? "- This is a SILHOUETTE. Focus on shape, outline, and contrast." : ""}
      ${transparentBackground ? "- This is an ISOLATED asset on a TRANSPARENT/WHITE background. Include keywords like 'isolated', 'cut out', 'transparent'." : ""}
      ${prohibitedWords ? "- FORBIDDEN WORDS: AI, Generated, Fake, Mockup, Template, Stock, Download, High Quality." : ""}
   
-  5. CONTEXT:
+  6. CONTEXT:
      ${savedKeywords?.length ? `- MANDATORY KEYWORDS TO INTEGRATE: ${savedKeywords.join(', ')}` : ""}
      ${customPromptEnabled && customPrompt ? `- USER SPECIFIC INSTRUCTIONS: ${customPrompt}` : ""}
 

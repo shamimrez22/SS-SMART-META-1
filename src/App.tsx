@@ -78,13 +78,13 @@ export default function App() {
     maxKeywords: 50,
     titleChoice: 1,
     metadataFor: 'all',
-    concurrency: 10,
+    concurrency: 20,
     singleWordKeywords: false,
     silhouette: false,
     transparentBackground: false,
     prohibitedWords: false,
     customPromptEnabled: false,
-    autoGenerateOnAdd: true,
+    autoGenerateOnAdd: false,
     savedKeywords: []
   });
 
@@ -96,6 +96,10 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [mode, setMode] = useState<'image' | 'vector' | 'video' | 'prompt'>('vector');
   const [theme, setTheme] = useState<'dark' | 'light' | 'blue'>('dark');
+  const filesRef = useRef(files);
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
   const [genOptions, setGenOptions] = useState({
     description: true,
     filenameHint: true,
@@ -349,14 +353,15 @@ export default function App() {
       const handle = await window.showDirectoryPicker();
       setDirectoryHandle(handle);
       const newItems: StockMetadata[] = [];
+      const newFileObjects: Record<string, File> = {};
       
       for await (const entry of handle.values()) {
         if (entry.kind === 'file') {
           const file = await entry.getFile();
           const ext = file.name.split('.').pop()?.toLowerCase() || '';
-          if (['png', 'eps', 'mp4', 'mov'].includes(ext)) {
+          if (['png', 'eps', 'mp4', 'mov', 'jpg', 'jpeg'].includes(ext)) {
             const id = Math.random().toString(36).substr(2, 9);
-            setFileObjects(prev => ({ ...prev, [id]: file }));
+            newFileObjects[id] = file;
             newItems.push({
               id,
               filename: file.name,
@@ -372,6 +377,7 @@ export default function App() {
           }
         }
       }
+      setFileObjects(prev => ({ ...prev, ...newFileObjects }));
       setFiles(prev => [...newItems, ...prev]);
     } catch (err) {
       console.error("Directory access denied or failed:", err);
@@ -402,12 +408,14 @@ export default function App() {
       });
 
       const newItems: StockMetadata[] = [];
+      const newFileObjects: Record<string, File> = {};
+
       for (const handle of fileHandles) {
         const file = await handle.getFile();
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
         const id = Math.random().toString(36).substr(2, 9);
         
-        setFileObjects(prev => ({ ...prev, [id]: file }));
+        newFileObjects[id] = file;
         newItems.push({
           id,
           filename: file.name,
@@ -421,6 +429,7 @@ export default function App() {
           handle: handle
         });
       }
+      setFileObjects(prev => ({ ...prev, ...newFileObjects }));
       setFiles(prev => [...newItems, ...prev]);
     } catch (err: any) {
       if (err.name !== 'AbortError') {
@@ -473,11 +482,6 @@ export default function App() {
 
       setFileObjects(prev => ({ ...prev, ...newFileObjects }));
       setFiles(prev => [...newItems, ...prev]);
-      
-      // Auto-start generation
-      setTimeout(() => {
-        startGeneration();
-      }, 500);
 
     } catch (err: any) {
       if (err.name !== 'AbortError') {
@@ -635,12 +639,10 @@ export default function App() {
   const startGeneration = async () => {
     if (isGenerating) return;
     
-    let pendingFiles = files.filter(f => f.status === 'pending');
+    let pendingFiles = filesRef.current.filter(f => f.status === 'pending');
     
-    // If no pending files, but user clicked Generate, re-run everything
-    if (pendingFiles.length === 0 && files.length > 0) {
+    if (pendingFiles.length === 0 && filesRef.current.length > 0) {
       setFiles(prev => prev.map(f => ({ ...f, status: 'pending' })));
-      // Wait for state update
       setTimeout(startGeneration, 100);
       return;
     }
@@ -657,58 +659,69 @@ export default function App() {
     stopRef.current = false;
     setProgress({ current: 0, total: pendingFiles.length });
 
-    // Parallel generation for maximum speed (concurrency from settings)
-    const concurrency = settings.concurrency || 10; // Increased default concurrency
+    const concurrency = settings.concurrency || 10;
     const pending = [...pendingFiles];
-    const active = new Set();
     
     const processNext = async () => {
-      if (stopRef.current || pending.length === 0) return;
-      
-      const fileMetadata = pending.shift()!;
-      active.add(fileMetadata.id);
-      
-      const actualFile = fileObjects[fileMetadata.id];
-      setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'generating' } : f));
-
-      try {
-        const result = await generateMetadata(actualFile, settings, { [activeKey.provider]: currentKey });
+      while (!stopRef.current && pending.length > 0) {
+        const fileMetadata = pending.shift()!;
+        const actualFile = fileObjects[fileMetadata.id];
         
-        setFiles(prev => prev.map(f => {
-          if (f.id === fileMetadata.id) {
-            const extension = f.filename.split('.').pop() || f.fileType;
-            return { 
-              ...f, 
-              ...result, 
-              filename: `${formatFilename(result.title)}.${extension}`,
-              status: 'completed' 
-            };
-          }
-          return f;
-        }));
+        if (!actualFile) {
+          console.error("File object not found for:", fileMetadata.id);
+          setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'error' } : f));
+          continue;
+        }
 
-        setProgress(prev => ({ ...prev, current: prev.current + 1 }));
-      } catch (error) {
-        setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'error' } : f));
-      } finally {
-        active.delete(fileMetadata.id);
-        await processNext();
+        setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'generating' } : f));
+
+        try {
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Generation timed out")), 60000)
+          );
+          
+          const result = await Promise.race([
+            generateMetadata(actualFile, settings, { [activeKey.provider]: currentKey }),
+            timeoutPromise
+          ]) as any;
+          
+          setFiles(prev => prev.map(f => {
+            if (f.id === fileMetadata.id) {
+              const extension = f.filename.split('.').pop() || f.fileType;
+              return { 
+                ...f, 
+                ...result, 
+                filename: `${formatFilename(result.title)}.${extension}`,
+                status: 'completed' 
+              };
+            }
+            return f;
+          }));
+
+          setProgress(prev => ({ ...prev, current: prev.current + 1 }));
+        } catch (error) {
+          console.error(`Error generating metadata for ${fileMetadata.filename}:`, error);
+          setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'error' } : f));
+        }
       }
     };
 
-    // Start initial batch
-    const initialBatch = Array.from({ length: Math.min(concurrency, pending.length) }, () => processNext());
-    await Promise.all(initialBatch);
+    try {
+      const initialBatch = Array.from({ length: Math.min(concurrency, pending.length) }, () => processNext());
+      await Promise.all(initialBatch);
+    } catch (err) {
+      console.error("Batch processing error:", err);
+    } finally {
+      setIsGenerating(false);
+    }
 
-    // Save to history
+    const finalFiles = filesRef.current;
     const newHistoryItem: HistoryItem = {
       id: Math.random().toString(36).substr(2, 9),
       timestamp: Date.now(),
-      files: [...files]
+      files: [...finalFiles]
     };
     setHistory(prev => [newHistoryItem, ...prev].slice(0, 50));
-
-    setIsGenerating(false);
   };
 
   const handleTestConnection = async (provider: keyof ApiConfig, index: number) => {
@@ -1008,9 +1021,6 @@ export default function App() {
       showNotification(`No valid ${settings.metadataFor} files found.`, 'error');
     } else {
       setFiles(prev => [...newItems, ...prev]);
-      if (settings.autoGenerateOnAdd) {
-        setTimeout(startGeneration, 500);
-      }
     }
   };
 
