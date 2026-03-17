@@ -1067,15 +1067,33 @@ export default function App() {
             </h1>
           </div>
           <div className="flex-1" />
-          <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest opacity-50">
-            Professional Metadata Engine
+          <div className="flex items-center gap-4">
+            <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest opacity-50 hidden sm:block">
+              Professional Metadata Engine
+            </div>
+            <button 
+              onClick={() => setIsHistoryOpen(true)}
+              className="flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-all group border border-transparent hover:border-white/10"
+              title="Open History"
+            >
+              <HistoryIcon size={14} className="text-muted-foreground group-hover:text-amber-400 transition-colors" />
+              <span className="text-[10px] font-bold text-muted-foreground group-hover:text-foreground uppercase tracking-tight">History</span>
+            </button>
+            <button 
+              onClick={() => setIsSettingsOpen(true)}
+              className="flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-all group border border-transparent hover:border-white/10"
+              title="Open Settings"
+            >
+              <Settings size={14} className="text-muted-foreground group-hover:text-blue-400 transition-colors" />
+              <span className="text-[10px] font-bold text-muted-foreground group-hover:text-foreground uppercase tracking-tight">Settings</span>
+            </button>
           </div>
         </div>
 
         {/* Ribbon Actions (The Buttons Area) */}
         <div className="flex flex-col bg-muted">
           {/* Controls Bar */}
-          <div className="flex items-center px-4 py-2 gap-6 border-b border-border/30">
+          <div className="flex items-center flex-wrap px-4 py-2 gap-y-4 gap-x-6 border-b border-border/30">
             {/* Active API Key Group */}
             <div className="flex flex-col gap-1.5 min-w-[150px]">
               <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Active AI Provider</span>
@@ -1264,30 +1282,11 @@ export default function App() {
             </div>
 
             {/* Utilities Group */}
-            <div className="flex items-center gap-2 px-2">
-              <button 
-                onClick={() => setIsHistoryOpen(true)}
-                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-white/10 rounded-md transition-all group cursor-pointer border border-transparent hover:border-white/5 shadow-sm"
-              >
-                <div className="p-1 text-muted-foreground group-hover:scale-110 group-hover:text-foreground transition-all">
-                  <HistoryIcon size={18} strokeWidth={2.5} />
-                </div>
-                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">History</span>
-              </button>
-              <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-white/10 rounded-md transition-all group cursor-pointer border border-transparent hover:border-white/5 shadow-sm"
-              >
-                <div className="p-1 text-muted-foreground group-hover:scale-110 group-hover:text-foreground transition-all">
-                  <Settings size={18} strokeWidth={2.5} />
-                </div>
-                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Settings</span>
-              </button>
-            </div>
+            <div className="flex-1" />
           </div>
 
           {/* Secondary Controls Bar */}
-          <div className="flex items-center px-4 py-1.5 gap-4 bg-secondary border-b border-border/50">
+          <div className="flex items-center flex-wrap px-4 py-1.5 gap-y-2 gap-x-4 bg-secondary border-b border-border/50">
             <div className="flex items-center gap-2">
               <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Asset Type:</span>
               <div className="flex bg-muted rounded-sm overflow-hidden border border-border p-0.5">
