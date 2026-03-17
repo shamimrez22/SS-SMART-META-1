@@ -72,7 +72,8 @@ export default function App() {
     minKeywords: 10,
     maxKeywords: 50,
     titleChoice: 1,
-    metadataFor: 'image'
+    metadataFor: 'image',
+    concurrency: 3
   });
 
   const [files, setFiles] = useState<StockMetadata[]>([]);
@@ -425,8 +426,8 @@ export default function App() {
     stopRef.current = false;
     setProgress({ current: 0, total: pendingFiles.length });
 
-    // Parallel generation for maximum speed (concurrency: 3)
-    const concurrency = 3;
+    // Parallel generation for maximum speed (concurrency from settings)
+    const concurrency = settings.concurrency || 3;
     const chunks = [];
     for (let i = 0; i < pendingFiles.length; i += concurrency) {
       chunks.push(pendingFiles.slice(i, i + concurrency));
@@ -520,12 +521,15 @@ export default function App() {
           data = completedFiles.map(f => ({
             Filename: f.filename,
             Title: f.title,
-            Keywords: f.keywords
+            Description: f.description,
+            Keywords: f.keywords,
+            Category: f.category || ''
           }));
           break;
         case 'shutterstock':
           data = completedFiles.map(f => ({
             Filename: f.filename,
+            Title: f.title,
             Description: f.description,
             Keywords: f.keywords
           }));
@@ -1386,6 +1390,29 @@ export default function App() {
                         onChange={(e) => setSettings(prev => ({ ...prev, maxKeywords: Math.max(parseInt(e.target.value), prev.minKeywords) }))}
                         className="w-full h-1 bg-muted rounded-lg appearance-none cursor-pointer accent-emerald-600"
                       />
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">BATCH CONCURRENCY</label>
+                      <span className="text-[10px] font-black text-blue-400 bg-blue-500/10 px-1.5 rounded uppercase">{settings.concurrency} FILES</span>
+                    </div>
+                    <div className="space-y-2 px-1">
+                      <input 
+                        type="range" 
+                        min="1" 
+                        max="10" 
+                        step="1"
+                        value={settings.concurrency}
+                        onChange={(e) => setSettings(prev => ({ ...prev, concurrency: parseInt(e.target.value) }))}
+                        className="w-full h-1 bg-muted rounded-lg appearance-none cursor-pointer accent-blue-600"
+                      />
+                      <div className="flex justify-between text-[8px] font-bold text-muted-foreground/50">
+                        <span>1</span>
+                        <span>3</span>
+                        <span>5</span>
+                        <span>10</span>
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -49,6 +49,7 @@ export interface GeneratorSettings {
   maxKeywords: number;
   titleChoice: number;
   metadataFor: 'image' | 'video' | 'eps' | 'png';
+  concurrency: number;
 }
 
 export interface HistoryItem {

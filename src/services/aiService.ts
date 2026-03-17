@@ -213,6 +213,11 @@ function getPrompt(settings: any, filename: string) {
   - Keywords: Provide EXACTLY ${maxKeywords || 50} highly relevant keywords, comma separated. Do not provide fewer than ${maxKeywords || 50} keywords.
   - Category: Provide a single relevant category for stock marketplace (e.g., Nature, Technology, People, Business, etc.).
   - Rating: ALWAYS provide a rating of 5.
+  
+  IMPORTANT: 
+  - DO NOT use irrelevant technical jargon like "UX", "UI", "Interface", "Web Design" unless the image specifically shows a user interface.
+  - Focus on descriptive, visual, and conceptual keywords that describe the content of the image/video.
+  - Ensure all words are spelled correctly and relevant to the visual content.
   `;
 
   if (promptMode === 'adobe') {
