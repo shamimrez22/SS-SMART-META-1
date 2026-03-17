@@ -38,7 +38,8 @@ import {
   Star,
   Tag,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  RefreshCcw
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as piexif from "piexifjs";
@@ -77,12 +78,13 @@ export default function App() {
     maxKeywords: 50,
     titleChoice: 1,
     metadataFor: 'all',
-    concurrency: 3,
+    concurrency: 10,
     singleWordKeywords: false,
     silhouette: false,
     transparentBackground: false,
     prohibitedWords: false,
     customPromptEnabled: false,
+    autoGenerateOnAdd: true,
     savedKeywords: []
   });
 
@@ -197,14 +199,17 @@ export default function App() {
               )}>
                 {file.status}
               </span>
-              {file.status === 'error' && (
+              {(file.status === 'error' || file.status === 'completed') && (
                 <button 
                   onClick={(e) => { e.stopPropagation(); regenerateSingleFile(file.id); }}
-                  className="text-[7px] font-black px-1 py-0.5 rounded uppercase tracking-widest bg-red-500 text-white hover:bg-red-400 transition-colors flex items-center gap-1 shadow-sm active:scale-95"
+                  className={cn(
+                    "text-[7px] font-black px-1 py-0.5 rounded uppercase tracking-widest transition-colors flex items-center gap-1 shadow-sm active:scale-95",
+                    file.status === 'error' ? "bg-red-500 text-white hover:bg-red-400" : "bg-blue-500 text-white hover:bg-blue-400"
+                  )}
                   title="RE-GENERATE METADATA"
                 >
                   <RefreshCw size={8} />
-                  RE-GENERATE
+                  {file.status === 'completed' ? 'RE-RUN' : 'RE-GENERATE'}
                 </button>
               )}
             </div>
@@ -630,7 +635,16 @@ export default function App() {
   const startGeneration = async () => {
     if (isGenerating) return;
     
-    const pendingFiles = files.filter(f => f.status === 'pending');
+    let pendingFiles = files.filter(f => f.status === 'pending');
+    
+    // If no pending files, but user clicked Generate, re-run everything
+    if (pendingFiles.length === 0 && files.length > 0) {
+      setFiles(prev => prev.map(f => ({ ...f, status: 'pending' })));
+      // Wait for state update
+      setTimeout(startGeneration, 100);
+      return;
+    }
+
     if (pendingFiles.length === 0) return;
 
     const currentKey = apiConfig[activeKey.provider][activeKey.index];
@@ -994,6 +1008,9 @@ export default function App() {
       showNotification(`No valid ${settings.metadataFor} files found.`, 'error');
     } else {
       setFiles(prev => [...newItems, ...prev]);
+      if (settings.autoGenerateOnAdd) {
+        setTimeout(startGeneration, 500);
+      }
     }
   };
 
@@ -1196,6 +1213,19 @@ export default function App() {
                   {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} className="fill-current" />}
                 </div>
                 <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Generate</span>
+              </button>
+              <button 
+                onClick={() => {
+                  setFiles(prev => prev.map(f => ({ ...f, status: 'pending' })));
+                  setTimeout(startGeneration, 100);
+                }}
+                disabled={isGenerating || files.length === 0}
+                className="flex flex-col items-center justify-center min-w-[56px] h-12 hover:bg-blue-500/10 rounded-md transition-all group cursor-pointer disabled:opacity-30 border border-transparent hover:border-blue-500/20 shadow-sm"
+              >
+                <div className="p-1 text-blue-400 group-hover:scale-110 group-hover:text-blue-300 transition-all">
+                  <RefreshCcw size={18} strokeWidth={2.5} />
+                </div>
+                <span className="text-[9px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Regen All</span>
               </button>
               <button 
                 onClick={() => {
@@ -1552,6 +1582,7 @@ export default function App() {
                 <div className="grid grid-cols-1 gap-2">
                   {[
                     { id: 'singleWordKeywords', label: 'Single Word Keywords' },
+                    { id: 'autoGenerateOnAdd', label: 'Auto-Generate on Add' },
                     { id: 'silhouette', label: 'Silhouette' },
                     { id: 'customPromptEnabled', label: 'Custom Prompt' },
                     { id: 'transparentBackground', label: 'Transparent Background' },
@@ -1669,97 +1700,148 @@ export default function App() {
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
                       <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">TITLE WORD RANGE</label>
-                      <span className="text-[10px] font-black text-blue-400 bg-blue-500/10 px-1.5 rounded uppercase">{settings.minTitleWords} - {settings.maxTitleWords}</span>
+                      <span className="text-[10px] font-black text-blue-400 bg-blue-500/10 px-1.5 rounded uppercase border border-blue-500/20">{settings.minTitleWords} - {settings.maxTitleWords}</span>
                     </div>
-                    <div className="space-y-2 px-1">
-                      <input 
-                        type="range" 
-                        min="1" 
-                        max="50" 
-                        value={settings.minTitleWords}
-                        onChange={(e) => setSettings(prev => ({ ...prev, minTitleWords: Math.min(parseInt(e.target.value), prev.maxTitleWords) }))}
-                        className="w-full h-1 bg-muted rounded-lg appearance-none cursor-pointer accent-blue-600"
-                      />
-                      <input 
-                        type="range" 
-                        min="1" 
-                        max="50" 
-                        value={settings.maxTitleWords}
-                        onChange={(e) => setSettings(prev => ({ ...prev, maxTitleWords: Math.max(parseInt(e.target.value), prev.minTitleWords) }))}
-                        className="w-full h-1 bg-muted rounded-lg appearance-none cursor-pointer accent-blue-600"
-                      />
+                    <div className="space-y-4 px-1 py-2 bg-muted/20 rounded-md border border-border/30">
+                      <div className="relative h-1 bg-muted rounded-full">
+                        <div 
+                          className="absolute h-full bg-blue-500/30 rounded-full"
+                          style={{ 
+                            left: `${(settings.minTitleWords / 50) * 100}%`, 
+                            right: `${100 - (settings.maxTitleWords / 50) * 100}%` 
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-[8px] font-bold text-muted-foreground w-6">MIN</span>
+                          <input 
+                            type="range" 
+                            min="1" 
+                            max="50" 
+                            value={settings.minTitleWords}
+                            onChange={(e) => setSettings(prev => ({ ...prev, minTitleWords: Math.min(parseInt(e.target.value), prev.maxTitleWords) }))}
+                            className="modern-slider slider-blue"
+                          />
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[8px] font-bold text-muted-foreground w-6">MAX</span>
+                          <input 
+                            type="range" 
+                            min="1" 
+                            max="50" 
+                            value={settings.maxTitleWords}
+                            onChange={(e) => setSettings(prev => ({ ...prev, maxTitleWords: Math.max(parseInt(e.target.value), prev.minTitleWords) }))}
+                            className="modern-slider slider-blue"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
 
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
                       <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">DESCRIPTION WORD RANGE</label>
-                      <span className="text-[10px] font-black text-cyan-400 bg-cyan-500/10 px-1.5 rounded uppercase">{settings.minDescriptionWords} - {settings.maxDescriptionWords}</span>
+                      <span className="text-[10px] font-black text-cyan-400 bg-cyan-500/10 px-1.5 rounded uppercase border border-cyan-500/20">{settings.minDescriptionWords} - {settings.maxDescriptionWords}</span>
                     </div>
-                    <div className="space-y-2 px-1">
-                      <input 
-                        type="range" 
-                        min="5" 
-                        max="100" 
-                        value={settings.minDescriptionWords}
-                        onChange={(e) => setSettings(prev => ({ ...prev, minDescriptionWords: Math.min(parseInt(e.target.value), prev.maxDescriptionWords) }))}
-                        className="w-full h-1 bg-muted rounded-lg appearance-none cursor-pointer accent-cyan-600"
-                      />
-                      <input 
-                        type="range" 
-                        min="5" 
-                        max="100" 
-                        value={settings.maxDescriptionWords}
-                        onChange={(e) => setSettings(prev => ({ ...prev, maxDescriptionWords: Math.max(parseInt(e.target.value), prev.minDescriptionWords) }))}
-                        className="w-full h-1 bg-muted rounded-lg appearance-none cursor-pointer accent-cyan-600"
-                      />
+                    <div className="space-y-4 px-1 py-2 bg-muted/20 rounded-md border border-border/30">
+                      <div className="relative h-1 bg-muted rounded-full">
+                        <div 
+                          className="absolute h-full bg-cyan-500/30 rounded-full"
+                          style={{ 
+                            left: `${(settings.minDescriptionWords / 100) * 100}%`, 
+                            right: `${100 - (settings.maxDescriptionWords / 100) * 100}%` 
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-[8px] font-bold text-muted-foreground w-6">MIN</span>
+                          <input 
+                            type="range" 
+                            min="5" 
+                            max="100" 
+                            value={settings.minDescriptionWords}
+                            onChange={(e) => setSettings(prev => ({ ...prev, minDescriptionWords: Math.min(parseInt(e.target.value), prev.maxDescriptionWords) }))}
+                            className="modern-slider slider-cyan"
+                          />
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[8px] font-bold text-muted-foreground w-6">MAX</span>
+                          <input 
+                            type="range" 
+                            min="5" 
+                            max="100" 
+                            value={settings.maxDescriptionWords}
+                            onChange={(e) => setSettings(prev => ({ ...prev, maxDescriptionWords: Math.max(parseInt(e.target.value), prev.minDescriptionWords) }))}
+                            className="modern-slider slider-cyan"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
 
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
                       <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">KEYWORD RANGE</label>
-                      <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-1.5 rounded uppercase">{settings.minKeywords} - {settings.maxKeywords}</span>
+                      <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-1.5 rounded uppercase border border-emerald-500/20">{settings.minKeywords} - {settings.maxKeywords}</span>
                     </div>
-                    <div className="space-y-2 px-1">
-                      <input 
-                        type="range" 
-                        min="5" 
-                        max="50" 
-                        value={settings.minKeywords}
-                        onChange={(e) => setSettings(prev => ({ ...prev, minKeywords: Math.min(parseInt(e.target.value), prev.maxKeywords) }))}
-                        className="w-full h-1 bg-muted rounded-lg appearance-none cursor-pointer accent-emerald-600"
-                      />
-                      <input 
-                        type="range" 
-                        min="5" 
-                        max="50" 
-                        value={settings.maxKeywords}
-                        onChange={(e) => setSettings(prev => ({ ...prev, maxKeywords: Math.max(parseInt(e.target.value), prev.minKeywords) }))}
-                        className="w-full h-1 bg-muted rounded-lg appearance-none cursor-pointer accent-emerald-600"
-                      />
+                    <div className="space-y-4 px-1 py-2 bg-muted/20 rounded-md border border-border/30">
+                      <div className="relative h-1 bg-muted rounded-full">
+                        <div 
+                          className="absolute h-full bg-emerald-500/30 rounded-full"
+                          style={{ 
+                            left: `${(settings.minKeywords / 50) * 100}%`, 
+                            right: `${100 - (settings.maxKeywords / 50) * 100}%` 
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-[8px] font-bold text-muted-foreground w-6">MIN</span>
+                          <input 
+                            type="range" 
+                            min="5" 
+                            max="50" 
+                            value={settings.minKeywords}
+                            onChange={(e) => setSettings(prev => ({ ...prev, minKeywords: Math.min(parseInt(e.target.value), prev.maxKeywords) }))}
+                            className="modern-slider slider-emerald"
+                          />
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[8px] font-bold text-muted-foreground w-6">MAX</span>
+                          <input 
+                            type="range" 
+                            min="5" 
+                            max="50" 
+                            value={settings.maxKeywords}
+                            onChange={(e) => setSettings(prev => ({ ...prev, maxKeywords: Math.max(parseInt(e.target.value), prev.minKeywords) }))}
+                            className="modern-slider slider-emerald"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
                       <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">BATCH CONCURRENCY</label>
-                      <span className="text-[10px] font-black text-blue-400 bg-blue-500/10 px-1.5 rounded uppercase">{settings.concurrency} FILES</span>
+                      <span className="text-[10px] font-black text-blue-400 bg-blue-500/10 px-1.5 rounded uppercase border border-blue-500/20">{settings.concurrency} FILES</span>
                     </div>
-                    <div className="space-y-2 px-1">
+                    <div className="space-y-4 px-1 py-2 bg-muted/20 rounded-md border border-border/30">
                       <input 
                         type="range" 
                         min="1" 
-                        max="10" 
+                        max="30" 
                         step="1"
                         value={settings.concurrency}
                         onChange={(e) => setSettings(prev => ({ ...prev, concurrency: parseInt(e.target.value) }))}
-                        className="w-full h-1 bg-muted rounded-lg appearance-none cursor-pointer accent-blue-600"
+                        className="modern-slider slider-blue"
                       />
-                      <div className="flex justify-between text-[8px] font-bold text-muted-foreground/50">
-                        <span>1</span>
-                        <span>3</span>
-                        <span>5</span>
-                        <span>10</span>
+                      <div className="flex justify-between text-[7px] font-black text-muted-foreground/40 uppercase tracking-tighter">
+                        <span>1 FILE</span>
+                        <span>10 FILES</span>
+                        <span>20 FILES</span>
+                        <span>30 FILES</span>
                       </div>
                     </div>
                   </div>
@@ -1842,7 +1924,12 @@ export default function App() {
         id="file-upload" 
         multiple 
         className="hidden" 
-        onChange={(e) => e.target.files && handleFilesAdded(e.target.files)}
+        onChange={(e) => {
+          if (e.target.files) {
+            handleFilesAdded(e.target.files);
+            e.target.value = ''; // Reset to allow re-uploading same file
+          }
+        }}
         accept=".jpg,.jpeg,.png,.eps,.mp4,.mov"
       />
       <input 
@@ -1851,7 +1938,12 @@ export default function App() {
         {...{ webkitdirectory: "", directory: "" }}
         multiple 
         className="hidden" 
-        onChange={(e) => e.target.files && handleFilesAdded(e.target.files)}
+        onChange={(e) => {
+          if (e.target.files) {
+            handleFilesAdded(e.target.files);
+            e.target.value = ''; // Reset to allow re-uploading same file
+          }
+        }}
       />
     </div>
   );

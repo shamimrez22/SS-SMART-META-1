@@ -55,6 +55,7 @@ export interface GeneratorSettings {
   transparentBackground: boolean;
   prohibitedWords: boolean;
   customPromptEnabled: boolean;
+  autoGenerateOnAdd: boolean;
   savedKeywords: string[];
 }
 

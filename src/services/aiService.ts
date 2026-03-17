@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 
 export async function testApiConnection(provider: 'gemini' | 'groq' | 'mistral', apiKey: string): Promise<{ success: boolean; message?: string }> {
   try {
@@ -107,6 +107,7 @@ async function generateWithGemini(file: File, settings: any, apiKey: string) {
     model: "gemini-3-flash-preview",
     contents: [{ parts }],
     config: {
+      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
@@ -201,61 +202,35 @@ async function fileToBase64(file: File): Promise<string> {
 
 function getPrompt(settings: any, filename: string) {
   const { 
-    titleWords, 
-    descriptionLength, 
-    keywordCount, 
-    promptMode, 
-    customPrompt, 
     metadataFor, 
     titleChoice, 
     minTitleWords, 
     maxTitleWords, 
     minDescriptionWords, 
     maxDescriptionWords, 
-    minKeywords, 
     maxKeywords,
     singleWordKeywords,
     silhouette,
     transparentBackground,
     prohibitedWords,
     customPromptEnabled,
+    customPrompt,
     savedKeywords
   } = settings;
   
-  let basePrompt = `Analyze the ${metadataFor || 'file'} named "${filename}" and generate stock marketplace metadata.
-  Return a JSON object with keys: "title", "description", "keywords", "category", "rating", "analysis".
-  
-  Analysis should include: theme, subject, objects (array), colors (array), concepts (array).
-  
-  Constraints:
-  - Title: Generate ${titleChoice || 1} title options. Each title should be between ${minTitleWords || 5} and ${maxTitleWords || 15} words long. SEO optimized.
-  - Description: Between ${minDescriptionWords || 15} and ${maxDescriptionWords || 30} words long, detailed and descriptive.
-  - Keywords: Provide EXACTLY ${maxKeywords || 50} highly relevant keywords, comma separated. Do not provide fewer than ${maxKeywords || 50} keywords.
-  - Category: Provide a single relevant category for stock marketplace (e.g., Nature, Technology, People, Business, etc.).
-  - Rating: ALWAYS provide a rating of 5.
-  
-  Specific Instructions:
-  ${singleWordKeywords ? "- Use ONLY single-word keywords. No phrases." : "- Use a mix of single-word and short phrase keywords."}
-  ${silhouette ? "- This asset is a SILHOUETTE. Ensure the metadata reflects this style." : ""}
-  ${transparentBackground ? "- This asset has a TRANSPARENT BACKGROUND (isolated). Mention 'isolated', 'transparent', 'white background' where appropriate." : ""}
-  ${prohibitedWords ? "- AVOID prohibited words: 'AI', 'Generated', 'Fake', 'Mockup', 'Template', 'Sample', 'Stock', 'Download'." : ""}
-  ${savedKeywords && savedKeywords.length > 0 ? `- MANDATORY KEYWORDS to include if relevant: ${savedKeywords.join(', ')}` : ""}
+  return `Act as a stock metadata expert. Analyze "${filename}" (${metadataFor || 'file'}).
+  Output JSON: {"title": "string", "description": "string", "keywords": "string", "category": "string", "rating": 5, "analysis": {"theme": "string", "subject": "string", "objects": [], "colors": [], "concepts": []}}
 
-  IMPORTANT: 
-  - DO NOT use irrelevant technical jargon like "UX", "UI", "Interface", "Web Design" unless the image specifically shows a user interface.
-  - Focus on descriptive, visual, and conceptual keywords that describe the content of the image/video.
-  - Ensure all words are spelled correctly and relevant to the visual content.
+  Rules:
+  - Title: ${titleChoice || 1} option, ${minTitleWords}-${maxTitleWords} words.
+  - Description: ${minDescriptionWords}-${maxDescriptionWords} words.
+  - Keywords: EXACTLY ${maxKeywords || 50} relevant keywords, comma-separated.
+  - Category: One stock category.
+  ${singleWordKeywords ? "- Keywords: Single words only." : "- Keywords: Mix of words/phrases."}
+  ${silhouette ? "- Style: Silhouette." : ""}
+  ${transparentBackground ? "- Style: Isolated/Transparent background." : ""}
+  ${prohibitedWords ? "- Prohibited: AI, Generated, Fake, Mockup, Template, Stock." : ""}
+  ${savedKeywords?.length ? `- Include: ${savedKeywords.join(', ')}` : ""}
+  ${customPromptEnabled && customPrompt ? `- Extra: ${customPrompt}` : ""}
   `;
-
-  if (promptMode === 'adobe') {
-    basePrompt += "\nOptimize specifically for Adobe Stock guidelines (descriptive, no spam).";
-  } else if (promptMode === 'shutterstock') {
-    basePrompt += "\nOptimize specifically for Shutterstock guidelines (concise, high-relevance).";
-  }
-
-  if (customPromptEnabled && customPrompt) {
-    basePrompt += `\nAdditional Instructions: ${customPrompt}`;
-  }
-
-  return basePrompt;
 }
