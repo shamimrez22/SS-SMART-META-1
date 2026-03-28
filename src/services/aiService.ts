@@ -158,7 +158,7 @@ async function generateWithGemini(file: File, settings: any, apiKey: string) {
   console.log("Starting Gemini generation for:", file?.name);
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-flash-latest",
+      model: "gemini-3-flash-preview",
       contents: [{ parts }],
       config: {
         responseMimeType: "application/json",
@@ -190,13 +190,10 @@ async function generateWithGemini(file: File, settings: any, apiKey: string) {
     let result: any = {};
     try {
       const text = response.text || "{}";
-      // Clean up potential markdown code blocks if the model returned them
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      const cleanJson = jsonMatch ? jsonMatch[0] : text;
-      result = JSON.parse(cleanJson);
+      result = JSON.parse(repairJson(text));
     } catch (e) {
       console.error("Failed to parse Gemini JSON response:", e, response.text);
-      throw new Error("Invalid JSON response from AI");
+      throw new Error("Invalid JSON response from AI. Please retry.");
     }
     
     if (settings.optimizeKeywords) {
@@ -204,9 +201,27 @@ async function generateWithGemini(file: File, settings: any, apiKey: string) {
       result.keywordScore = calculateKeywordScore(result.keywords, settings.minKeywords || 20);
     }
     return result;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini API Error:", error);
-    throw error;
+    const msg = error.message || "Unknown Gemini Error";
+    if (msg.includes("429")) throw new Error("Rate limit exceeded (429). Please wait a moment.");
+    if (msg.includes("401")) throw new Error("Invalid API Key (401).");
+    if (msg.includes("SAFETY")) throw new Error("Content blocked by safety filters.");
+    throw new Error(msg);
+  }
+}
+
+function repairJson(text: string): string {
+  try {
+    // Try to find the first { and last }
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      return text.substring(firstBrace, lastBrace + 1);
+    }
+    return text;
+  } catch (e) {
+    return text;
   }
 }
 
@@ -217,29 +232,47 @@ async function generateWithOpenAICompatible(file: File, settings: any, apiKey: s
   
   const model = provider === 'groq' ? "llama-3.3-70b-versatile" : "mistral-small-latest";
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: "You are a stock metadata expert. Return ONLY valid JSON." },
-        { role: "user", content: getPrompt(settings, file?.name || "unnamed_file") }
-      ],
-      response_format: { type: "json_object" }
-    })
-  });
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: "You are a stock metadata expert. Return ONLY valid JSON." },
+          { role: "user", content: getPrompt(settings, file?.name || "unnamed_file") }
+        ],
+        response_format: { type: "json_object" }
+      })
+    });
 
-  const data = await response.json();
-  const result = JSON.parse(data.choices[0].message.content);
-  if (settings.optimizeKeywords) {
-    result.keywords = optimizeKeywords(result.keywords, settings.maxKeywords || 50);
-    result.keywordScore = calculateKeywordScore(result.keywords, settings.minKeywords || 20);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const msg = errorData.error?.message || `API Error (${response.status})`;
+      if (response.status === 429) throw new Error("Rate limit exceeded (429). Please wait.");
+      if (response.status === 401) throw new Error("Invalid API Key (401).");
+      throw new Error(msg);
+    }
+
+    const data = await response.json();
+    if (!data.choices?.[0]?.message?.content) {
+      throw new Error("Empty response from AI provider.");
+    }
+
+    const result = JSON.parse(repairJson(data.choices[0].message.content));
+    
+    if (settings.optimizeKeywords) {
+      result.keywords = optimizeKeywords(result.keywords, settings.maxKeywords || 50);
+      result.keywordScore = calculateKeywordScore(result.keywords, settings.minKeywords || 20);
+    }
+    return result;
+  } catch (error: any) {
+    console.error(`${provider} API Error:`, error);
+    throw error;
   }
-  return result;
 }
 
 function optimizeKeywords(keywords: string, max: number): string {

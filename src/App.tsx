@@ -138,9 +138,16 @@ const FileRow = React.memo(({ index, style, data }: any) => {
             )}>
               {file.status}
               {file.status === 'error' && file.errorMessage && (
-                <div className="absolute bottom-full left-0 mb-1 w-48 p-1.5 bg-background border border-border rounded shadow-xl text-[7px] font-bold text-red-400 z-50 hidden group-hover:block break-words normal-case">
+                <div className="absolute bottom-full left-0 mb-2 w-64 p-2 bg-background border border-red-500/50 rounded shadow-2xl text-[8px] font-bold text-red-400 z-50 hidden group-hover:block break-words normal-case backdrop-blur-md">
+                  <div className="flex items-center gap-1 mb-1 border-b border-red-500/20 pb-1">
+                    <AlertCircle size={10} />
+                    <span>ERROR DETAILS</span>
+                  </div>
                   {file.errorMessage}
                 </div>
+              )}
+              {file.status === 'error' && (
+                <AlertCircle size={8} className="inline-block ml-1 text-red-500 animate-bounce" />
               )}
             </span>
             {(file.status === 'error' || file.status === 'completed') && (
@@ -375,12 +382,24 @@ export default function App() {
 
   // Save config to local storage
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ apiConfig, settings, activeKey }));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ apiConfig, settings, activeKey }));
+    } catch (err) {
+      console.error("Failed to save config to local storage:", err);
+    }
   }, [apiConfig, settings, activeKey]);
 
   // Save history to local storage
   useEffect(() => {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    } catch (err) {
+      console.error("Failed to save history to local storage:", err);
+      // If history is too large, trim it further
+      if (history.length > 10) {
+        setHistory(prev => prev.slice(0, 10));
+      }
+    }
   }, [history]);
 
   // Handle Theme Switching
@@ -718,14 +737,17 @@ export default function App() {
     const concurrency = settings.concurrency || 10;
     const pending = [...pendingFiles];
     
-    const processNext = async () => {
+    const processNext = async (index: number) => {
+      // Add a small staggered start for each worker to avoid immediate rate limits
+      await new Promise(resolve => setTimeout(resolve, index * 500));
+      
       while (!stopRef.current && pending.length > 0) {
         const fileMetadata = pending.shift()!;
         const actualFile = fileObjects[fileMetadata.id];
         
         if (!actualFile) {
           console.error("File object not found for:", fileMetadata.id);
-          setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'error' } : f));
+          setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'error', errorMessage: "File data lost. Please re-upload." } : f));
           continue;
         }
 
@@ -734,10 +756,10 @@ export default function App() {
 
         while (retryCount <= maxRetries && !stopRef.current) {
           try {
-            setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: retryCount > 0 ? 'retrying' : 'generating' } : f));
+            setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: retryCount > 0 ? 'retrying' : 'generating', errorMessage: undefined } : f));
 
             const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error("Generation timed out")), 120000)
+              setTimeout(() => reject(new Error("Generation timed out (120s)")), 120000)
             );
             
             const result = await Promise.race([
@@ -760,15 +782,24 @@ export default function App() {
             }));
 
             setProgress(prev => ({ ...prev, current: prev.current + 1 }));
+            
+            // Add a small delay between successful requests to respect rate limits
+            if (pending.length > 0) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
             break; // Success, exit retry loop
           } catch (error: any) {
             retryCount++;
+            const errorMsg = error.message || "Unknown Error";
+            
             if (retryCount > maxRetries || stopRef.current) {
               console.error(`Error generating metadata for ${fileMetadata.filename}:`, error);
-              setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'error', errorMessage: error.message } : f));
+              setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'error', errorMessage: errorMsg } : f));
+              setProgress(prev => ({ ...prev, current: prev.current + 1 }));
             } else {
-              console.log(`Retrying ${fileMetadata.filename} (${retryCount}/${maxRetries})...`);
-              await new Promise(resolve => setTimeout(resolve, 2000 * retryCount)); // Exponential backoff
+              console.log(`Retrying ${fileMetadata.filename} (${retryCount}/${maxRetries}) due to: ${errorMsg}`);
+              setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, errorMessage: `Retry ${retryCount}: ${errorMsg}` } : f));
+              await new Promise(resolve => setTimeout(resolve, 3000 * retryCount)); // Exponential backoff
             }
           }
         }
@@ -776,7 +807,7 @@ export default function App() {
     };
 
     try {
-      const initialBatch = Array.from({ length: Math.min(concurrency, pending.length) }, () => processNext());
+      const initialBatch = Array.from({ length: Math.min(concurrency, pending.length) }, (_, i) => processNext(i));
       await Promise.all(initialBatch);
     } catch (err) {
       console.error("Batch processing error:", err);
