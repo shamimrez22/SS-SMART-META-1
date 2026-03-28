@@ -95,7 +95,7 @@ async function generateWithGemini(file: File, settings: any, apiKey: string) {
 
   if (file && file.type.startsWith('image/')) {
     try {
-      const resizedBase64 = await resizeImage(file, 800, 800);
+      const resizedBase64 = await resizeImage(file, 512, 512);
       parts.push({
         inlineData: {
           data: resizedBase64.split(',')[1],

@@ -5,7 +5,7 @@ export interface StockMetadata {
   description: string;
   keywords: string;
   rating: number;
-  status: 'pending' | 'generating' | 'completed' | 'error' | 'saving' | 'saved';
+  status: 'pending' | 'generating' | 'completed' | 'error' | 'saving' | 'saved' | 'retrying';
   fileType: string;
   previewUrl?: string;
   handle?: any; // FileSystemFileHandle
