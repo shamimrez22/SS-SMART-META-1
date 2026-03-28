@@ -131,12 +131,17 @@ const FileRow = React.memo(({ index, style, data }: any) => {
           <div className="text-[9px] font-black text-muted-foreground truncate leading-none uppercase tracking-tighter">{file.filename}</div>
           <div className="flex items-center gap-1 mt-0.5">
             <span className={cn(
-              "text-[6px] font-black px-1 py-0 rounded-[1px] uppercase tracking-widest border",
+              "text-[6px] font-black px-1 py-0 rounded-[1px] uppercase tracking-widest border group relative",
               file.status === 'completed' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
               (file.status === 'generating' || file.status === 'retrying') ? "bg-blue-500/10 text-blue-400 border-blue-500/20 animate-pulse" :
               file.status === 'error' ? "bg-red-500/10 text-red-400 border-red-500/20" : "bg-muted text-muted-foreground border-border"
             )}>
               {file.status}
+              {file.status === 'error' && file.errorMessage && (
+                <div className="absolute bottom-full left-0 mb-1 w-48 p-1.5 bg-background border border-border rounded shadow-xl text-[7px] font-bold text-red-400 z-50 hidden group-hover:block break-words normal-case">
+                  {file.errorMessage}
+                </div>
+              )}
             </span>
             {(file.status === 'error' || file.status === 'completed') && (
               <button 
@@ -663,7 +668,7 @@ export default function App() {
       return;
     }
 
-    setFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'generating' } : f));
+    setFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'generating', errorMessage: undefined } : f));
 
     try {
       const result = await generateMetadata(actualFile, settings, { [activeKey.provider]: currentKey });
@@ -674,15 +679,16 @@ export default function App() {
             ...f, 
             ...result, 
             filename: `${formatFilename(result.title)}.${extension}`,
-            status: 'completed' 
+            status: 'completed',
+            errorMessage: undefined
           };
         }
         return f;
       }));
       showNotification(`Regenerated ${fileMetadata.filename}`, 'success');
-    } catch (error) {
-      setFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'error' } : f));
-      showNotification(`Failed to regenerate ${fileMetadata.filename}`, 'error');
+    } catch (error: any) {
+      setFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'error', errorMessage: error.message } : f));
+      showNotification(`Failed to regenerate ${fileMetadata.filename}: ${error.message}`, 'error');
     }
   };
 
@@ -746,7 +752,8 @@ export default function App() {
                   ...f, 
                   ...result, 
                   filename: `${formatFilename(result.title)}.${extension}`,
-                  status: 'completed' 
+                  status: 'completed',
+                  errorMessage: undefined
                 };
               }
               return f;
@@ -754,11 +761,11 @@ export default function App() {
 
             setProgress(prev => ({ ...prev, current: prev.current + 1 }));
             break; // Success, exit retry loop
-          } catch (error) {
+          } catch (error: any) {
             retryCount++;
             if (retryCount > maxRetries || stopRef.current) {
               console.error(`Error generating metadata for ${fileMetadata.filename}:`, error);
-              setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'error' } : f));
+              setFiles(prev => prev.map(f => f.id === fileMetadata.id ? { ...f, status: 'error', errorMessage: error.message } : f));
             } else {
               console.log(`Retrying ${fileMetadata.filename} (${retryCount}/${maxRetries})...`);
               await new Promise(resolve => setTimeout(resolve, 2000 * retryCount)); // Exponential backoff
@@ -1127,35 +1134,35 @@ export default function App() {
       {/* Main Header */}
       <header className="bg-secondary border-b border-border z-40 shadow-xl relative text-foreground">
         {/* Top Branding Bar */}
-        <div className="flex items-center px-4 py-1.5 bg-background border-b border-border/50">
+        <div className="flex items-center px-4 py-2 bg-background border-b border-border/50">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-blue-600 rounded flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <Sparkles size={14} className="text-white" />
+            <div className="w-7 h-7 bg-blue-600 rounded flex items-center justify-center shadow-lg shadow-blue-500/20">
+              <Sparkles size={18} className="text-white" />
             </div>
-            <h1 className="text-[11px] font-black uppercase tracking-[0.2em] text-foreground">
+            <h1 className="text-[13px] font-black uppercase tracking-[0.2em] text-foreground">
               SS <span className="text-blue-500">Smart Meta</span>
             </h1>
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-4">
-            <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest opacity-50 hidden sm:block">
+            <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-50 hidden sm:block">
               Professional Metadata Engine
             </div>
             <button 
               onClick={() => setIsHistoryOpen(true)}
-              className="flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-all group border border-transparent hover:border-white/10"
+              className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-white/10 rounded transition-all group border border-transparent hover:border-white/10"
               title="Open History"
             >
-              <HistoryIcon size={14} className="text-muted-foreground group-hover:text-amber-400 transition-colors" />
-              <span className="text-[10px] font-bold text-muted-foreground group-hover:text-foreground uppercase tracking-tight">History</span>
+              <HistoryIcon size={16} className="text-muted-foreground group-hover:text-amber-400 transition-colors" />
+              <span className="text-[11px] font-bold text-muted-foreground group-hover:text-foreground uppercase tracking-tight">History</span>
             </button>
             <button 
               onClick={() => setIsSettingsOpen(true)}
-              className="flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-all group border border-transparent hover:border-white/10"
+              className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-white/10 rounded transition-all group border border-transparent hover:border-white/10"
               title="Open Settings"
             >
-              <Settings size={14} className="text-muted-foreground group-hover:text-blue-400 transition-colors" />
-              <span className="text-[10px] font-bold text-muted-foreground group-hover:text-foreground uppercase tracking-tight">Settings</span>
+              <Settings size={16} className="text-muted-foreground group-hover:text-blue-400 transition-colors" />
+              <span className="text-[11px] font-bold text-muted-foreground group-hover:text-foreground uppercase tracking-tight">Settings</span>
             </button>
           </div>
         </div>
@@ -1166,7 +1173,7 @@ export default function App() {
           <div className="flex items-center flex-wrap px-4 py-0.5 gap-y-1 gap-x-2 border-b border-border/30">
             {/* Active AI Provider Group */}
             <div className="flex flex-col gap-0.5 p-0.5 border border-border rounded-sm bg-background/20 min-w-[130px] shadow-sm">
-              <span className="text-[7px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/60 w-fit">Active AI Provider</span>
+              <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/60 w-fit">Active AI Provider</span>
               <select 
                 value={activeKey.provider}
                 onChange={(e) => {
@@ -1174,7 +1181,7 @@ export default function App() {
                   const firstReadyIndex = apiConfig[provider].findIndex(key => key.trim() !== '');
                   setActiveKey({ provider, index: firstReadyIndex !== -1 ? firstReadyIndex : 0 });
                 }}
-                className="bg-secondary border border-border text-foreground text-[9px] px-1 py-0 rounded-[1px] focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer h-5 font-bold uppercase"
+                className="bg-secondary border border-border text-foreground text-[11px] px-1 py-0 rounded-[1px] focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer h-7 font-bold uppercase"
               >
                 <option value="gemini">GEMINI {apiConfig.gemini.some(k => k) ? '(READY)' : '(EMPTY)'}</option>
                 <option value="groq">GROQ {apiConfig.groq.some(k => k) ? '(READY)' : '(EMPTY)'}</option>
@@ -1184,11 +1191,11 @@ export default function App() {
 
             {/* Theme Group */}
             <div className="flex flex-col gap-0.5 p-0.5 border border-border rounded-sm bg-background/20 shadow-sm">
-              <span className="text-[7px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/60 w-fit">Theme</span>
+              <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/60 w-fit">Theme</span>
               <select 
                 value={theme}
                 onChange={(e) => setTheme(e.target.value as any)}
-                className="bg-secondary border border-border text-foreground text-[9px] px-1 py-0 rounded-[1px] focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer h-5 font-bold uppercase"
+                className="bg-secondary border border-border text-foreground text-[11px] px-1 py-0 rounded-[1px] focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer h-7 font-bold uppercase"
               >
                 <option value="dark">Dark</option>
                 <option value="light">Light</option>
@@ -1198,34 +1205,34 @@ export default function App() {
 
             {/* Gen Options Group */}
             <div className="flex flex-col gap-0.5 p-0.5 border border-border rounded-sm bg-background/20 shadow-sm">
-              <span className="text-[7px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/60 w-fit">Gen Options</span>
-              <div className="flex items-center gap-2 px-1 h-5">
+              <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/60 w-fit">Gen Options</span>
+              <div className="flex items-center gap-2 px-1 h-7">
                 <label className="flex items-center gap-1 cursor-pointer group">
                   <input 
                     type="checkbox" 
                     checked={genOptions.autoSave}
                     onChange={(e) => setGenOptions(prev => ({ ...prev, autoSave: e.target.checked }))}
-                    className="w-2.5 h-2.5 rounded-[1px] bg-muted border-border text-blue-600 focus:ring-0 focus:ring-offset-0"
+                    className="w-3 h-3 rounded-[1px] bg-muted border-border text-blue-600 focus:ring-0 focus:ring-offset-0"
                   />
-                  <span className="text-[8px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase">Save</span>
+                  <span className="text-[10px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase">Save</span>
                 </label>
                 <label className="flex items-center gap-1 cursor-pointer group">
                   <input 
                     type="checkbox" 
                     checked={genOptions.autoExport}
                     onChange={(e) => setGenOptions(prev => ({ ...prev, autoExport: e.target.checked }))}
-                    className="w-2.5 h-2.5 rounded-[1px] bg-muted border-border text-blue-600 focus:ring-0 focus:ring-offset-0"
+                    className="w-3 h-3 rounded-[1px] bg-muted border-border text-blue-600 focus:ring-0 focus:ring-offset-0"
                   />
-                  <span className="text-[8px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase">Export</span>
+                  <span className="text-[10px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase">Export</span>
                 </label>
                 <label className="flex items-center gap-1 cursor-pointer group">
                   <input 
                     type="checkbox" 
                     checked={genOptions.aiEnhance}
                     onChange={(e) => setGenOptions(prev => ({ ...prev, aiEnhance: e.target.checked }))}
-                    className="w-2.5 h-2.5 rounded-[1px] bg-muted border-border text-blue-600 focus:ring-0 focus:ring-offset-0"
+                    className="w-3 h-3 rounded-[1px] bg-muted border-border text-blue-600 focus:ring-0 focus:ring-offset-0"
                   />
-                  <span className="text-[8px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase">Enhance</span>
+                  <span className="text-[10px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase">Enhance</span>
                 </label>
               </div>
             </div>
@@ -1233,44 +1240,44 @@ export default function App() {
             <div className="flex-1" />
 
             {/* Input Group */}
-            <div className="flex items-center gap-1 p-0.5 border border-border rounded-sm bg-background/20 relative pt-2.5 shadow-sm">
+            <div className="flex items-center gap-1.5 p-1 border border-border rounded-sm bg-background/20 relative pt-3 shadow-sm">
               <div className="absolute top-0 left-1 -translate-y-1/2">
-                <span className="text-[7px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/80 backdrop-blur-sm">Input</span>
+                <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/80 backdrop-blur-sm">Input</span>
               </div>
               <button 
                 onClick={() => document.getElementById('file-upload')?.click()}
-                className="flex flex-col items-center justify-center min-w-[42px] h-8 hover:bg-white/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-blue-500/50 shadow-sm bg-background/40"
+                className="flex flex-col items-center justify-center min-w-[50px] h-10 hover:bg-white/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-blue-500/50 shadow-sm bg-background/40"
               >
                 <div className="p-0 text-blue-400 group-hover:scale-110 group-hover:text-blue-300 transition-all">
-                  <Plus size={12} strokeWidth={3} />
+                  <Plus size={16} strokeWidth={3} />
                 </div>
-                <span className="text-[7px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Add Files</span>
+                <span className="text-[9px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Add Files</span>
               </button>
               <button 
                 onClick={() => document.getElementById('folder-upload')?.click()}
-                className="flex flex-col items-center justify-center min-w-[42px] h-8 hover:bg-white/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-amber-500/50 shadow-sm bg-background/40"
+                className="flex flex-col items-center justify-center min-w-[50px] h-10 hover:bg-white/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-amber-500/50 shadow-sm bg-background/40"
               >
                 <div className="p-0 text-amber-400 group-hover:scale-110 group-hover:text-amber-300 transition-all">
-                  <FolderPlus size={12} strokeWidth={3} />
+                  <FolderPlus size={16} strokeWidth={3} />
                 </div>
-                <span className="text-[7px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Add Folder</span>
+                <span className="text-[9px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Add Folder</span>
               </button>
             </div>
 
             {/* Processing Group */}
-            <div className="flex items-center gap-1 p-0.5 border border-border rounded-sm bg-background/20 relative pt-2.5 shadow-sm">
+            <div className="flex items-center gap-1.5 p-1 border border-border rounded-sm bg-background/20 relative pt-3 shadow-sm">
               <div className="absolute top-0 left-1 -translate-y-1/2">
-                <span className="text-[7px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/80 backdrop-blur-sm">Processing</span>
+                <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/80 backdrop-blur-sm">Processing</span>
               </div>
               <button 
                 onClick={startGeneration}
                 disabled={isGenerating || files.length === 0}
-                className="flex flex-col items-center justify-center min-w-[42px] h-8 hover:bg-emerald-500/10 rounded-[1px] transition-all group cursor-pointer disabled:opacity-30 border border-border hover:border-emerald-500/50 shadow-sm bg-background/40"
+                className="flex flex-col items-center justify-center min-w-[50px] h-10 hover:bg-emerald-500/10 rounded-[1px] transition-all group cursor-pointer disabled:opacity-30 border border-border hover:border-emerald-500/50 shadow-sm bg-background/40"
               >
                 <div className="p-0 text-emerald-400 group-hover:scale-110 group-hover:text-emerald-300 transition-all">
-                  {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} className="fill-current" />}
+                  {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} className="fill-current" />}
                 </div>
-                <span className="text-[7px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Generate</span>
+                <span className="text-[9px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Generate</span>
               </button>
               <button 
                 onClick={() => {
@@ -1278,12 +1285,12 @@ export default function App() {
                   setTimeout(startGeneration, 100);
                 }}
                 disabled={isGenerating || files.length === 0}
-                className="flex flex-col items-center justify-center min-w-[42px] h-8 hover:bg-blue-500/10 rounded-[1px] transition-all group cursor-pointer disabled:opacity-30 border border-border hover:border-blue-500/50 shadow-sm bg-background/40"
+                className="flex flex-col items-center justify-center min-w-[50px] h-10 hover:bg-blue-500/10 rounded-[1px] transition-all group cursor-pointer disabled:opacity-30 border border-border hover:border-blue-500/50 shadow-sm bg-background/40"
               >
                 <div className="p-0 text-blue-400 group-hover:scale-110 group-hover:text-blue-300 transition-all">
-                  <RefreshCcw size={12} strokeWidth={3} />
+                  <RefreshCcw size={16} strokeWidth={3} />
                 </div>
-                <span className="text-[7px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Regen All</span>
+                <span className="text-[9px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Regen All</span>
               </button>
               <button 
                 onClick={() => {
@@ -1291,12 +1298,12 @@ export default function App() {
                   setTimeout(startGeneration, 100);
                 }}
                 disabled={isGenerating || !files.some(f => f.status === 'error')}
-                className="flex flex-col items-center justify-center min-w-[42px] h-8 hover:bg-amber-500/10 rounded-[1px] transition-all group cursor-pointer disabled:opacity-30 border border-border hover:border-amber-500/50 shadow-sm bg-background/40"
+                className="flex flex-col items-center justify-center min-w-[50px] h-10 hover:bg-amber-500/10 rounded-[1px] transition-all group cursor-pointer disabled:opacity-30 border border-border hover:border-amber-500/50 shadow-sm bg-background/40"
               >
                 <div className="p-0 text-amber-400 group-hover:scale-110 group-hover:text-amber-300 transition-all">
-                  <RefreshCw size={12} strokeWidth={3} />
+                  <RefreshCw size={16} strokeWidth={3} />
                 </div>
-                <span className="text-[7px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Retry Errors</span>
+                <span className="text-[9px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Retry Errors</span>
               </button>
               <button 
                 onClick={() => {
@@ -1304,74 +1311,74 @@ export default function App() {
                   setIsGenerating(false);
                 }}
                 disabled={!isGenerating}
-                className="flex flex-col items-center justify-center min-w-[42px] h-8 hover:bg-rose-500/10 rounded-[1px] transition-all group cursor-pointer disabled:opacity-30 border border-border hover:border-rose-500/50 shadow-sm bg-background/40"
+                className="flex flex-col items-center justify-center min-w-[50px] h-10 hover:bg-rose-500/10 rounded-[1px] transition-all group cursor-pointer disabled:opacity-30 border border-border hover:border-rose-500/50 shadow-sm bg-background/40"
               >
                 <div className="p-0 text-rose-400 group-hover:scale-110 group-hover:text-rose-300 transition-all">
-                  <Square size={10} className="fill-current" />
+                  <Square size={14} className="fill-current" />
                 </div>
-                <span className="text-[7px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Stop</span>
+                <span className="text-[9px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Stop</span>
               </button>
               <button 
                 onClick={clearAll}
-                className="flex flex-col items-center justify-center min-w-[42px] h-8 hover:bg-rose-500/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-rose-500/50 shadow-sm bg-background/40"
+                className="flex flex-col items-center justify-center min-w-[50px] h-10 hover:bg-rose-500/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-rose-500/50 shadow-sm bg-background/40"
               >
                 <div className="p-0 text-rose-400 group-hover:scale-110 group-hover:text-rose-300 transition-all">
-                  <Trash2 size={12} strokeWidth={3} />
+                  <Trash2 size={16} strokeWidth={3} />
                 </div>
-                <span className="text-[7px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Clear</span>
+                <span className="text-[9px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Clear</span>
               </button>
             </div>
 
             {/* Export Group */}
-            <div className="flex items-center gap-1 p-0.5 border border-border rounded-sm bg-background/20 relative pt-2.5 shadow-sm">
+            <div className="flex items-center gap-1.5 p-1 border border-border rounded-sm bg-background/20 relative pt-3 shadow-sm">
               <div className="absolute top-0 left-1 -translate-y-1/2">
-                <span className="text-[7px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/80 backdrop-blur-sm">Export</span>
+                <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/80 backdrop-blur-sm">Export</span>
               </div>
               <button 
                 onClick={() => handleExport('csv')}
-                className="flex flex-col items-center justify-center min-w-[42px] h-8 hover:bg-cyan-500/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-cyan-500/50 shadow-sm bg-background/40"
+                className="flex flex-col items-center justify-center min-w-[50px] h-10 hover:bg-cyan-500/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-cyan-500/50 shadow-sm bg-background/40"
               >
                 <div className="p-0 text-cyan-400 group-hover:scale-110 group-hover:text-cyan-300 transition-all">
-                  <FileSpreadsheet size={12} strokeWidth={3} />
+                  <FileSpreadsheet size={16} strokeWidth={3} />
                 </div>
-                <span className="text-[7px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Export CSV</span>
+                <span className="text-[9px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Export CSV</span>
               </button>
             </div>
 
             {/* Embed Actions Group */}
-            <div className="flex items-center gap-1 p-0.5 border border-border rounded-sm bg-background/20 relative pt-2.5 shadow-sm">
+            <div className="flex items-center gap-1.5 p-1 border border-border rounded-sm bg-background/20 relative pt-3 shadow-sm">
               <div className="absolute top-0 left-1 -translate-y-1/2">
-                <span className="text-[7px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/80 backdrop-blur-sm">Embed</span>
+                <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest border border-border px-1 rounded-[1px] bg-background/80 backdrop-blur-sm">Embed</span>
               </div>
               <button 
                 onClick={() => handleEmbed('image')}
-                className="flex flex-col items-center justify-center min-w-[42px] h-8 hover:bg-indigo-500/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-indigo-500/50 shadow-sm bg-background/40"
+                className="flex flex-col items-center justify-center min-w-[50px] h-10 hover:bg-indigo-500/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-indigo-500/50 shadow-sm bg-background/40"
                 title="Embed Metadata & Open Photoshop"
               >
                 <div className="p-0 text-indigo-400 group-hover:scale-110 group-hover:text-indigo-300 transition-all">
-                  <FileImage size={12} strokeWidth={3} />
+                  <FileImage size={16} strokeWidth={3} />
                 </div>
-                <span className="text-[7px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Img Embed</span>
+                <span className="text-[9px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Img Embed</span>
               </button>
               <button 
                 onClick={() => handleEmbed('eps')}
-                className="flex flex-col items-center justify-center min-w-[42px] h-8 hover:bg-orange-500/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-orange-500/50 shadow-sm bg-background/40"
+                className="flex flex-col items-center justify-center min-w-[50px] h-10 hover:bg-orange-500/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-orange-500/50 shadow-sm bg-background/40"
                 title="Embed Metadata & Open Illustrator"
               >
                 <div className="p-0 text-orange-400 group-hover:scale-110 group-hover:text-orange-300 transition-all">
-                  <Layers size={12} strokeWidth={3} />
+                  <Layers size={16} strokeWidth={3} />
                 </div>
-                <span className="text-[7px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">EPS Embed</span>
+                <span className="text-[9px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">EPS Embed</span>
               </button>
               <button 
                 onClick={() => handleEmbed('video')}
-                className="flex flex-col items-center justify-center min-w-[42px] h-8 hover:bg-emerald-500/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-emerald-500/50 shadow-sm bg-background/40"
+                className="flex flex-col items-center justify-center min-w-[50px] h-10 hover:bg-emerald-500/10 rounded-[1px] transition-all group cursor-pointer border border-border hover:border-emerald-500/50 shadow-sm bg-background/40"
                 title="Auto Embed Video Metadata"
               >
                 <div className="p-0 text-emerald-400 group-hover:scale-110 group-hover:text-emerald-300 transition-all">
-                  <Video size={12} strokeWidth={3} />
+                  <Video size={16} strokeWidth={3} />
                 </div>
-                <span className="text-[7px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Vid Embed</span>
+                <span className="text-[9px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tighter">Vid Embed</span>
               </button>
             </div>
 
@@ -1380,9 +1387,9 @@ export default function App() {
           </div>
 
           {/* Secondary Controls Bar */}
-          <div className="flex items-center flex-wrap px-4 py-1 gap-y-1.5 gap-x-3 bg-secondary border-b border-border/50">
-            <div className="flex items-center gap-1.5 border border-border/60 px-1.5 py-0.5 rounded-sm bg-muted/20">
-              <span className="text-[7px] font-bold text-muted-foreground uppercase tracking-widest border border-border/30 px-1 rounded-[2px] bg-background/40 w-fit">Asset Type:</span>
+          <div className="flex items-center flex-wrap px-4 py-1.5 gap-y-2 gap-x-4 bg-secondary border-b border-border/50">
+            <div className="flex items-center gap-2 border border-border/60 px-2 py-1 rounded-sm bg-muted/20">
+              <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest border border-border/30 px-1.5 rounded-[2px] bg-background/40 w-fit">Asset Type:</span>
               <div className="flex bg-muted rounded-sm overflow-hidden border border-border p-0.5">
                 {[
                   { id: 'all', label: 'All', icon: Database },
@@ -1394,23 +1401,23 @@ export default function App() {
                     key={item.id}
                     onClick={() => setSettings(prev => ({ ...prev, metadataFor: item.id as any }))}
                     className={cn(
-                      "flex items-center gap-1 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-sm transition-all",
+                      "flex items-center gap-1.5 px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded-sm transition-all",
                       settings.metadataFor === item.id ? "bg-blue-500 text-white shadow-md shadow-blue-500/20" : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
                     )}
                   >
-                    <item.icon size={9} />
+                    <item.icon size={12} />
                     {item.label}
                   </button>
                 ))}
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 border border-border/60 px-1.5 py-0.5 rounded-sm bg-muted/20">
-              <span className="text-[7px] font-bold text-muted-foreground uppercase tracking-widest border border-border/30 px-1 rounded-[2px] bg-background/40 w-fit">Export Preset:</span>
+            <div className="flex items-center gap-2 border border-border/60 px-2 py-1 rounded-sm bg-muted/20">
+              <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest border border-border/30 px-1.5 rounded-[2px] bg-background/40 w-fit">Export Preset:</span>
               <select 
                 value={selectedExportSite}
                 onChange={(e) => setSelectedExportSite(e.target.value)}
-                className="bg-secondary border border-border text-foreground text-[8px] px-1.5 py-0.5 rounded focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer"
+                className="bg-secondary border border-border text-foreground text-[10px] px-2 py-1 rounded focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer"
               >
                 <option value="adobe">Adobe Stock</option>
                 <option value="shutterstock">Shutterstock</option>
@@ -1426,22 +1433,22 @@ export default function App() {
 
             <button 
               onClick={() => handleExport(selectedExportSite)}
-              className="px-2 py-0.5 rounded bg-blue-500 text-white border border-blue-400 text-[8px] font-black uppercase tracking-widest hover:bg-blue-400 hover:scale-105 active:scale-95 transition-all flex items-center gap-1 shadow-lg shadow-blue-500/20"
+              className="px-3 py-1 rounded bg-blue-500 text-white border border-blue-400 text-[10px] font-black uppercase tracking-widest hover:bg-blue-400 hover:scale-105 active:scale-95 transition-all flex items-center gap-1.5 shadow-lg shadow-blue-500/20"
             >
-              <Download size={9} strokeWidth={3} />
+              <Download size={12} strokeWidth={3} />
               Download CSV
             </button>
 
             <div className="flex-1" />
 
-            <div className="flex items-center gap-2 ml-auto">
-              <div className="flex items-center gap-1.5 border border-border/30 px-1.5 py-0.5 rounded-sm bg-background/40">
-                <div className={cn("w-1 h-1 rounded-full shadow-[0_0_5px_rgba(16,185,129,0.5)]", isGenerating ? "bg-amber-500 animate-pulse" : "bg-emerald-500")} />
-                <span className="text-[7px] font-bold text-muted-foreground uppercase tracking-widest">{isGenerating ? 'Processing...' : 'System Ready'}</span>
+            <div className="flex items-center gap-3 ml-auto">
+              <div className="flex items-center gap-2 border border-border/30 px-2 py-1 rounded-sm bg-background/40">
+                <div className={cn("w-1.5 h-1.5 rounded-full shadow-[0_0_5px_rgba(16,185,129,0.5)]", isGenerating ? "bg-amber-500 animate-pulse" : "bg-emerald-500")} />
+                <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">{isGenerating ? 'Processing...' : 'System Ready'}</span>
               </div>
-              <div className="flex items-center gap-1.5 border border-border/30 px-1.5 py-0.5 rounded-sm bg-background/40">
-                <span className="text-[7px] font-bold text-muted-foreground uppercase tracking-widest">Assets:</span>
-                <span className="text-[7px] font-bold text-blue-400">{files.length}</span>
+              <div className="flex items-center gap-2 border border-border/30 px-2 py-1 rounded-sm bg-background/40">
+                <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Assets:</span>
+                <span className="text-[10px] font-black text-blue-400 tabular-nums">{files.length}</span>
               </div>
             </div>
           </div>

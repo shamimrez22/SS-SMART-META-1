@@ -19,6 +19,7 @@ export interface StockMetadata {
   category?: string;
   kwCount?: number;
   keywordScore?: number;
+  errorMessage?: string;
 }
 
 export interface ApiConfig {

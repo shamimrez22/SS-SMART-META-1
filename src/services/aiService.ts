@@ -89,13 +89,45 @@ export async function generateMetadata(
   }
 }
 
+const SUPPORTED_GEMINI_MIMES = [
+  'image/png', 
+  'image/jpeg', 
+  'image/webp', 
+  'image/heic', 
+  'image/heif',
+  'application/pdf'
+];
+
+async function extractEpsMetadata(file: File): Promise<string> {
+  try {
+    const buffer = await file.slice(0, 8192).arrayBuffer();
+    const text = new TextDecoder().decode(buffer);
+    const titleMatch = text.match(/%%Title:\s*(.*)/i);
+    const creatorMatch = text.match(/%%Creator:\s*(.*)/i);
+    const keywordsMatch = text.match(/%%Keywords:\s*(.*)/i);
+    const subjectMatch = text.match(/%%Subject:\s*(.*)/i);
+    
+    let info = "";
+    if (titleMatch) info += `Title Hint: ${titleMatch[1].trim()}\n`;
+    if (creatorMatch) info += `Creator Hint: ${creatorMatch[1].trim()}\n`;
+    if (subjectMatch) info += `Subject Hint: ${subjectMatch[1].trim()}\n`;
+    if (keywordsMatch) info += `Keywords Hint: ${keywordsMatch[1].trim()}\n`;
+    return info;
+  } catch (e) {
+    return "";
+  }
+}
+
 async function generateWithGemini(file: File, settings: any, apiKey: string) {
   const ai = new GoogleGenAI({ apiKey });
   const parts: any[] = [{ text: getPrompt(settings, file?.name || "unnamed_file") }];
 
-  if (file && file.type.startsWith('image/')) {
+  const isSupportedImage = file && SUPPORTED_GEMINI_MIMES.includes(file.type);
+  const isEps = file && (file.name.toLowerCase().endsWith('.eps') || file.type === 'application/postscript' || file.type === 'image/x-eps');
+
+  if (isSupportedImage) {
     try {
-      const resizedBase64 = await resizeImage(file, 512, 512);
+      const resizedBase64 = await resizeImage(file, 1024, 1024); // Increased resolution for better analysis
       parts.push({
         inlineData: {
           data: resizedBase64.split(',')[1],
@@ -104,7 +136,6 @@ async function generateWithGemini(file: File, settings: any, apiKey: string) {
       });
     } catch (e) {
       console.error("Error resizing image:", e);
-      // Fallback to original if resizing fails
       try {
         const base64Data = await fileToBase64(file);
         parts.push({
@@ -117,12 +148,17 @@ async function generateWithGemini(file: File, settings: any, apiKey: string) {
         console.error("Error converting file to base64:", err);
       }
     }
+  } else if (isEps) {
+    const epsInfo = await extractEpsMetadata(file);
+    parts[0].text += `\n\n[FILE CONTEXT]\nType: EPS Vector Illustration\n${epsInfo}\nNote: Visual preview unavailable for this EPS file. Use the filename and metadata hints to generate accurate stock metadata.`;
+  } else {
+    parts[0].text += `\n\n[FILE CONTEXT]\nType: ${file.type || 'Unknown'}\nNote: Visual preview unavailable. Generate metadata based on filename: "${file.name}".`;
   }
 
   console.log("Starting Gemini generation for:", file?.name);
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-flash-latest",
       contents: [{ parts }],
       config: {
         responseMimeType: "application/json",
@@ -289,7 +325,10 @@ function getPrompt(settings: any, filename: string) {
   
   return `Act as a World-Class Stock Photography SEO Expert. 
   
-  CRITICAL: You are provided with an image/file. You MUST prioritize the VISUAL CONTENT of the image over the filename. The filename "${filename}" is only for reference; the actual content in the image is the primary source of truth.
+  CRITICAL: You are provided with an image/file. 
+  - If visual content is provided, you MUST prioritize it over the filename. 
+  - If visual content is NOT provided (e.g., EPS/Vector files), you MUST use the filename and any provided metadata hints to generate the most professional and relevant stock metadata.
+  - The filename "${filename}" is a key reference.
 
   Your goal is to generate 100% ACCURATE and SEO-OPTIMIZED metadata for this ${metadataFor || 'asset'}.
 
@@ -310,30 +349,30 @@ function getPrompt(settings: any, filename: string) {
   }
 
   STRICT SEO & ACCURACY GUIDELINES:
-  1. VISUAL ANALYSIS:
+  1. VISUAL ANALYSIS (If available):
      - Look closely at the image. Identify the main subject, background, lighting, and mood.
      - If the filename contradicts the image, IGNORE the filename and describe the image.
   
   2. TITLE: 
-     - Must be a clear, literal description of what is VISUALLY PRESENT. 
+     - Must be a clear, literal description of what is VISUALLY PRESENT (or implied by filename). 
      - Place the most important keywords at the START.
      - Length: ${minTitleWords}-${maxTitleWords} words.
      - NO keyword stuffing. Use natural, searchable phrases.
   
   3. DESCRIPTION:
-     - Write a complete, professional sentence describing the visual scene.
+     - Write a complete, professional sentence describing the visual scene or concept.
      - Describe the subject, action, and environment in detail.
      - Length: ${minDescriptionWords}-${maxDescriptionWords} words.
 
   4. KEYWORDS:
      - Provide EXACTLY ${maxKeywords || 50} keywords.
-     - ORDER BY RELEVANCE: Most critical visual elements MUST come first.
+     - ORDER BY RELEVANCE: Most critical visual/conceptual elements MUST come first.
      - Be specific (e.g., use "Golden Retriever" instead of just "dog").
      - Include conceptual keywords derived from the visual mood (e.g., "freedom", "success", "growth").
      ${singleWordKeywords ? "- Use ONLY single-word keywords." : "- Use a mix of specific single words and highly relevant 2-3 word phrases."}
 
   5. ACCURACY:
-     - DO NOT hallucinate. Only describe what is actually VISIBLE in the file.
+     - DO NOT hallucinate. Only describe what is actually VISIBLE or strongly implied.
      - If it's a photo, describe it as a photo. If it's an illustration, say so.
      ${silhouette ? "- This is a SILHOUETTE. Focus on shape, outline, and contrast." : ""}
      ${transparentBackground ? "- This is an ISOLATED asset on a TRANSPARENT/WHITE background. Include keywords like 'isolated', 'cut out', 'transparent'." : ""}
